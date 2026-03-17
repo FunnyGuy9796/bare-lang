@@ -13,7 +13,7 @@ static const vector<string> REG_NAMES = {
 };
 
 static const vector<string> OPERATORS = {
-    ">=", "<=", "==", "!=", "+", "-", "++", "--"
+    ">", "<", ">=", "<=", "==", "!=", "+", "-", "++", "--"
 };
 
 token_type_t Lexer::classify(const string &value) {
@@ -107,6 +107,16 @@ static vector<string> split_lexum(const string &raw) {
                 parts.push_back(".");
             } else
                 curr.push_back(c);
+        } else if (c == '-' && i + 1 < raw.size() && raw[i + 1] == '>') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+
+                curr = "";
+            }
+
+            parts.push_back("->");
+
+            i++;
         } else if ((c == '+' || c == '-' || c == '=') && i + 1 < raw.size() && raw[i + 1] == c) {
             if (!curr.empty()) {
                 parts.push_back(curr);
@@ -117,6 +127,19 @@ static vector<string> split_lexum(const string &raw) {
             parts.push_back(string(2, c));
 
             i++;
+        } else if (c == '>' || c == '<') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+
+                curr = "";
+            }
+
+            if (i + 1 < raw.size() && raw[i + 1] == '=') {
+                parts.push_back(string(1, c) + "=");
+                
+                i++;
+            } else
+                parts.push_back(string(1, c));
         } else
             curr.push_back(c);
     }

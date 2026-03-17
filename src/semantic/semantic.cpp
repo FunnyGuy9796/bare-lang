@@ -197,7 +197,7 @@ void SemanticAnalyzer::check_statement(ASTNode &node) {
             report("'" + call->name + "' is not a proc");
     } else if (auto *incr = dynamic_cast<IncrStmt *>(&node)) {
         if (!locals.lookup(incr->name) && !globals.lookup(incr->name))
-            report("unkown variable '" + incr->name + "' in increment");
+            report("unknown variable '" + incr->name + "' in increment");
     } else if (auto *when = dynamic_cast<WhenBlock *>(&node))
         check_when(*when);
     else if (auto *loop = dynamic_cast<LoopBlock *>(&node))
@@ -214,7 +214,7 @@ void SemanticAnalyzer::check_statement(ASTNode &node) {
     } else if (dynamic_cast<AsmBlock *>(&node)) {
         
     } else
-        report("unkown statement in proc '" + curr_proc + "'");
+        report("unknown statement in proc '" + curr_proc + "'");
 }
 
 void SemanticAnalyzer::check_assign(AssignStmt &node) {
@@ -227,7 +227,7 @@ void SemanticAnalyzer::check_assign(AssignStmt &node) {
             obj = globals.lookup(mem->object);
         
         if (!obj) {
-            report("unkown variable '" + mem->object + "' in member access");
+            report("unknown variable '" + mem->object + "' in member access");
 
             return;
         }
@@ -243,7 +243,7 @@ void SemanticAnalyzer::check_assign(AssignStmt &node) {
             sym = globals.lookup(arr->name);
 
         if (!sym)
-            report("unkown variable '" + arr->name + "' in array access");
+            report("unknown variable '" + arr->name + "' in array access");
         else if (!sym->is_array)
             report("'" + arr->name + "' is not an array");
         
@@ -275,7 +275,7 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
         if (!sym) {
             report("use of undeclared identifier '" + ident->name + "'");
 
-            return "unkown";
+            return "unknown";
         }
 
         return sym->type;
@@ -288,9 +288,9 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
             obj = globals.lookup(mem->object);
         
         if (!obj) {
-            report("unkown variable '" + mem->object + "'");
+            report("unknown variable '" + mem->object + "'");
 
-            return "unkown";
+            return "unknown";
         }
 
         return obj->type;
@@ -303,9 +303,9 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
             sym = globals.lookup(arr->name);
         
         if (!sym) {
-            report("unkown array '" + arr->name + "'");
+            report("unknown array '" + arr->name + "'");
 
-            return "unkown";
+            return "unknown";
         }
 
         return sym->type;
@@ -315,7 +315,7 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
         resolve_type(*bin->left);
         resolve_type(*bin->right);
 
-        if (bin->op == "==" || bin->op == ">=" || bin->op == "<=" || bin->op == "!=")
+        if (bin->op == ">" || bin->op == "<" || bin->op == "==" || bin->op == ">=" || bin->op == "<=" || bin->op == "!=")
             return "u1";
         
         return resolve_type(*bin->left);
@@ -323,7 +323,7 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
 
     report("unresolved expression type");
 
-    return "unkown";
+    return "unknown";
 }
 
 void SemanticAnalyzer::check_when(WhenBlock &node) {

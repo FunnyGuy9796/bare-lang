@@ -7,7 +7,7 @@ section .rodata:
 const x: u32 = 32
 
 section .bss:
-var entries: entry[9]
+var entries: entry[10]
 var count: u32
 
 section .text:
@@ -16,7 +16,7 @@ conv test_call:
     ret: reg eax
 
 proc test() -> (result: u1) using test_call:
-    when reg ebx >= 9:
+    when reg ebx > 9:
         reg eax = 1
 
         ret
