@@ -1,0 +1,7 @@
+section .text:
+conv start_call:
+    args: null
+    ret: reg eax
+
+proc _start() -> () using start_call:
+    exit 42 // exiting with code 42 to verify that the program actually ran successfully

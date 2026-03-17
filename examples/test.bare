@@ -1,0 +1,72 @@
+data entry:
+    base: u32
+    length: u32
+end
+
+section .rodata:
+const x: u32 = 32
+
+section .bss:
+var entries: entry[9]
+var count: u32
+
+section .text:
+conv test_call:
+    args: reg ebx
+    ret: reg eax
+
+proc test() -> (result: u1) using test_call:
+    when reg ebx >= 9:
+        reg eax = 1
+
+        ret
+    end
+
+    reg eax = 0
+    
+    ret
+
+conv start_call:
+    args: null
+    ret: reg eax
+
+proc _start() -> () using start_call:
+    frame:
+        var curr_entry: entry
+        curr_entry.base = 0xff000000
+        curr_entry.length = 4096
+
+        loop:
+            reg ebx = count
+
+            test()
+
+            when reg eax == 1:
+                break
+            end
+
+            entries[count] = curr_entry
+
+            // inline assembly to make a syscall for printing the value of count
+            asm:
+                "mov eax, dword [count]"
+                "add eax, 48"              ; convert digit to ASCII (works for 0-9)
+                "mov [esp - 4], eax"       ; store ASCII char on stack
+                "mov eax, 4"               ; sys_write
+                "mov ebx, 1"               ; stdout
+                "lea ecx, [esp - 4]"       ; pointer to char
+                "mov edx, 1"               ; length = 1 byte
+                "int 0x80"
+                "mov eax, 4"               ; sys_write again for newline
+                "mov ebx, 1"
+                "mov dword [esp - 4], 10"  ; newline character
+                "lea ecx, [esp - 4]"
+                "mov edx, 1"
+                "int 0x80"
+            end
+
+            count++
+        end
+    end
+
+    exit 0
