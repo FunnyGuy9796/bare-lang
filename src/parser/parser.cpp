@@ -66,6 +66,25 @@ unique_ptr<SectionDecl> Parser::parse_section() {
 
     node->name = expect(SECTION_NAME).value;
 
+    if (check(IDENT) && peek().value == "follows") {
+        consume();
+        expect(LPAREN);
+
+        string follows_name = consume().value;
+
+        expect(RPAREN);
+
+        node->attributes = "follows=" + follows_name;
+    }
+
+    size_t start = node->attributes.find_first_not_of(" \t\n\r");
+    size_t end = node->attributes.find_last_not_of(" \t\n\r");
+    
+    if (start != string::npos)
+        node->attributes = node->attributes.substr(start, end - start + 1);
+    else
+        node->attributes = "";
+
     expect(COLON);
     
     while (!at_end() && !check_value("section")) {
@@ -82,6 +101,17 @@ unique_ptr<SectionDecl> Parser::parse_section() {
 
             bits->width = stoi(expect(INT_LITERAL).value);
             node->contents.push_back(move(bits));
+        } else if (check_value("org")) {
+            expect(KEYWORD);
+
+            auto org = make_unique<OrgStmt>();
+
+            if (check(HEX_LITERAL))
+                org->address = stoull(consume().value, nullptr, 16);
+            else
+                org->address = stoull(expect(INT_LITERAL).value);
+
+            node->contents.push_back(move(org));
         } else if (check_value("db") || check_value("dw") || check_value("dd") || check_value("dq")) {
             string dir = consume().value;
             auto raw = make_unique<RawData>();
@@ -137,7 +167,7 @@ unique_ptr<ProcDecl> Parser::parse_proc() {
         }
 
         if (check_value("section") || check_value("proc") || check_value("var") || check_value("const") || check_value("bits") || check_value("db")
-            || check_value("dw") || check_value("dd") || check_value("dq") || check_value("fill"))
+            || check_value("dw") || check_value("dd") || check_value("dq") || check_value("fill") || check_value("org"))
             break;
 
         node->body.push_back(parse_statement());
@@ -185,7 +215,11 @@ unique_ptr<ConstDecl> Parser::parse_const() {
 
     expect(ASSIGN);
 
-    node->value = parse_expr();
+    if (check(STRING_LITERAL)) {
+        node->is_string = true;
+        node->str_value = consume().value;
+    } else
+        node->value = parse_expr();
 
     return node;
 }
@@ -580,6 +614,11 @@ unique_ptr<ASTNode> Parser::parse_expr() {
 
         node->op = "~";
         node->operand = parse_expr();
+        left = move(node);
+    } else if (check(STRING_LITERAL)) {
+        auto node = make_unique<StringLiteral>();
+
+        node->value = consume().value;
         left = move(node);
     } else if (check_value("addr")) {
         expect(KEYWORD);

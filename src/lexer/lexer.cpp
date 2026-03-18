@@ -3,7 +3,7 @@
 static const vector<string> KEYWORDS = {
     "data", "end", "section", "const", "var", "proc", "when", "ret", "reg", "seg",
     "frame", "loop", "break", "args", "null", "asm", "syscall", "addr", "in", "out",
-    "cli", "sti", "hlt", "bits", "db", "dw", "dd", "dq", "fill"
+    "cli", "sti", "hlt", "bits", "db", "dw", "dd", "dq", "fill", "org"
 };
 
 static const vector<string> TYPES = {
@@ -304,7 +304,7 @@ vector<token_t> Lexer::lex_file(map<uint32_t, string> &content) {
                 }
 
                 tokens.push_back({ INT_LITERAL, to_string(val), line_num });
-                
+
                 continue;
             }
 

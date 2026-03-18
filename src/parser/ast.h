@@ -40,10 +40,13 @@ struct ConstDecl : ASTNode {
     string name;
     string type;
     unique_ptr<ASTNode> value;
+    string str_value;
+    bool is_string = false;
 };
 
 struct SectionDecl : ASTNode {
     string name;
+    string attributes;
     vector<unique_ptr<ASTNode>> contents;
 };
 
@@ -170,6 +173,14 @@ struct RawData : ASTNode {
 struct FillStmt : ASTNode {
     unique_ptr<ASTNode> target;
     unique_ptr<ASTNode> value;
+};
+
+struct StringLiteral : ASTNode {
+    string value;
+};
+
+struct OrgStmt : ASTNode {
+    uint32_t address;
 };
 
 struct Program : ASTNode {

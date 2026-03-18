@@ -65,10 +65,26 @@ void CodeGen::gen_program(Program &program) {
 }
 
 void CodeGen::gen_section(SectionDecl &section) {
-    out << "section " << section.name << "\n";
+    for (const auto &node : section.contents) {
+        if (auto *org = dynamic_cast<OrgStmt *>(node.get())) {
+            stringstream ss;
+
+            ss << "0x" << hex << org->address;
+            out << "org " << ss.str() << "\n";
+        }
+    }
+
+    out << "section " << section.name;
+
+    if (!section.attributes.empty())
+        out << " " << section.attributes;
+
+    out << "\n";
 
     for (const auto &node : section.contents) {
-        if (auto *bits = dynamic_cast<BitsStmt *>(node.get()))
+        if (dynamic_cast<OrgStmt *>(node.get()))
+            continue;
+        else if (auto *bits = dynamic_cast<BitsStmt *>(node.get()))
             out << "bits " << bits->width << "\n";
         else if (auto *var = dynamic_cast<VarDecl *>(node.get()))
             gen_var_bss(*var);
@@ -97,6 +113,12 @@ void CodeGen::gen_var_bss(VarDecl &decl) {
 }
 
 void CodeGen::gen_const(ConstDecl &decl) {
+    if (decl.is_string) {
+        out << decl.name << ": db \"" << decl.str_value << "\", 0\n";
+
+        return;
+    }
+
     string dbX;
     int size = type_size(decl.type);
 
@@ -110,7 +132,7 @@ void CodeGen::gen_const(ConstDecl &decl) {
         dbX = "dq";
     else
         dbX = "dd";
-    
+
     string val = gen_operand(*decl.value);
 
     out << "    " << decl.name << ": " << dbX << " " << val << "\n";
@@ -704,7 +726,10 @@ void CodeGen::gen_raw_data(RawData &node) {
         if (i > 0)
             out << ",";
 
-        out << " " << gen_operand(*node.values[i]);
+        if (auto *str = dynamic_cast<StringLiteral *>(node.values[i].get()))
+            out << " \"" << str->value << "\"";
+        else
+            out << " " << gen_operand(*node.values[i]);
     }
 
     out << "\n";

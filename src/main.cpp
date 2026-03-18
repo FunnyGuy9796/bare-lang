@@ -16,6 +16,7 @@ string output_name = "";
 bool rec_input = false;
 bool rec_output = false;
 bool emit_asm = false;
+bool emit_bin = false;
 
 void print_help() {
     cout << "Usage: bare-compiler -b <files...> [-o <output>] [options]\n\n";
@@ -23,17 +24,19 @@ void print_help() {
     cout << "  -b <files...>     specify input .bare source files\n\n";
     cout << "Output:\n";
     cout << "  -o <output>       specify output file name (default: out.o)\n";
-    cout << "  -S                emit assembly only (.asm)\n\n";
+    cout << "  -S                emit assembly only (.asm)\n";
+    cout << "  -bin              assemble to flat binary (for bootloaders)\n\n";
     cout << "Options:\n";
     cout << "  -h, --help        show this help message\n";
     cout << "  -v, --version     show compiler version\n\n";
     cout << "Examples:\n";
     cout << "  bare-compiler -b main.bare -o main.o\n";
-    cout << "  bare-compiler -b main.bare -S -o main.asm\n\n";
+    cout << "  bare-compiler -b main.bare -S -o main.asm\n";
+    cout << "  bare-compiler -b boot.bare -o boot.bin -bin\n\n";
     cout << "Linking examples:\n";
     cout << "  Linux ELF32:\n";
     cout << "    ld -m elf_i386 -o program main.o\n\n";
-    cout << "  Bootloader:\n";
+    cout << "  Bootloader (manual):\n";
     cout << "    ld -m elf_i386 --oformat binary -Ttext 0x7C00 -o boot.bin boot.o\n\n";
     cout << "  With GCC:\n";
     cout << "    gcc -m32 -nostdlib -o program main.o\n";
@@ -49,7 +52,7 @@ int main(int argc, char **argv) {
 
         if (str == "-h" || str == "--help") {
             print_help();
-
+            
             return 0;
         } else if (str == "-v" || str == "--version") {
             print_version();
@@ -63,10 +66,16 @@ int main(int argc, char **argv) {
         } else if (str == "-o") {
             rec_input = false;
             rec_output = true;
-            
+
             continue;
         } else if (str == "-S") {
             emit_asm = true;
+            rec_output = false;
+
+            continue;
+        } else if (str == "-bin") {
+            emit_bin = true;
+            rec_input = false;
             rec_output = false;
 
             continue;
@@ -84,9 +93,15 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    if (output_name.empty())
-        output_name = emit_asm ? "out.asm" : "out.o";
-    
+    if (output_name.empty()) {
+        if (emit_asm)
+            output_name = "out.asm";
+        else if (emit_bin)
+            output_name = "out.bin";
+        else
+            output_name = "out.o";
+    }
+
     if (input_names.empty()) {
         cerr << "no input files provided" << endl;
 
@@ -95,8 +110,8 @@ int main(int argc, char **argv) {
 
     Lexer lexer;
     vector<token_t> tokens;
-    
-    for (int i = 0; i < input_names.size(); i++) {
+
+    for (size_t i = 0; i < input_names.size(); i++) {
         ifstream input(input_names[i]);
 
         if (!input.is_open()) {
@@ -109,7 +124,7 @@ int main(int argc, char **argv) {
         uint32_t line_num = 1;
 
         while (getline(input, line)) {
-            bool is_blank = line.find_first_not_of(" \t\r\n") == std::string::npos;
+            bool is_blank = line.find_first_not_of(" \t\r\n") == string::npos;
 
             if (line.empty() || is_blank) {
                 line_num++;
@@ -139,13 +154,12 @@ int main(int argc, char **argv) {
         ofstream asm_file(output_name);
 
         if (!asm_file.is_open()) {
-            cerr << "coult not create '" << output_name << "'" << endl;
+            cerr << "could not create '" << output_name << "'" << endl;
 
             return 1;
         }
 
         asm_file << asm_output;
-
         cout << "compiled successfully -> " << output_name << endl;
 
         return 0;
@@ -165,6 +179,22 @@ int main(int argc, char **argv) {
 
     Assembler assembler;
     string err;
+
+    if (emit_bin) {
+        if (!assembler.assemble_bin(tmp_asm, output_name, err)) {
+            cerr << "assembly failed:\n" << err << endl;
+
+            remove(tmp_asm.c_str());
+
+            return 1;
+        }
+
+        remove(tmp_asm.c_str());
+
+        cout << "compiled successfully -> " << output_name << endl;
+
+        return 0;
+    }
 
     if (!assembler.assemble(tmp_asm, output_name, err)) {
         cerr << "assembly failed:\n" << err << endl;

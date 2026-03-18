@@ -49,8 +49,16 @@ int Assembler::run(const vector<string> &args, string &err_output) {
     return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
 
-bool Assembler::assemble(const string &asm_file, const string &obj_file, string &err, bool binary) {
-    int ret = run({"nasm", "-f", "elf32", asm_file, "-o", obj_file}, err);
+bool Assembler::assemble(const string &asm_file, const string &obj_file, string &err, const vector<string> &extra_flags) {
+    vector<string> args = {"nasm", "-f", "elf32", asm_file, "-o", obj_file};
+    
+    args.insert(args.end(), extra_flags.begin(), extra_flags.end());
 
-    return ret == 0;
+    return run(args, err) == 0;
+}
+
+bool Assembler::assemble_bin(const string &asm_file, const string &bin_file, string &err) {
+    vector<string> args = {"nasm", "-f", "bin", asm_file, "-o", bin_file};
+
+    return run(args, err) == 0;
 }

@@ -116,6 +116,8 @@ void SemanticAnalyzer::collect_sections(SectionDecl &section) {
             }
         } else if (dynamic_cast<BitsStmt *>(node.get())) {
 
+        } else if (dynamic_cast<OrgStmt *>(node.get())) {
+
         } else if (dynamic_cast<RawData *>(node.get())) {
 
         } else if (dynamic_cast<FillStmt *>(node.get())) {
