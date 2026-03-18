@@ -69,53 +69,48 @@ unique_ptr<SectionDecl> Parser::parse_section() {
     expect(COLON);
     
     while (!at_end() && !check_value("section")) {
-        if (check_value("conv"))
-            node->contents.push_back(parse_conv());
-        else if (check_value("proc"))
+        if (check_value("proc"))
             node->contents.push_back(parse_proc());
         else if (check_value("var"))
             node->contents.push_back(parse_var());
         else if (check_value("const"))
             node->contents.push_back(parse_const());
-        else
+        else if (check_value("bits")) {
+            expect(KEYWORD);
+
+            auto bits = make_unique<BitsStmt>();
+
+            bits->width = stoi(expect(INT_LITERAL).value);
+            node->contents.push_back(move(bits));
+        } else if (check_value("db") || check_value("dw") || check_value("dd") || check_value("dq")) {
+            string dir = consume().value;
+            auto raw = make_unique<RawData>();
+
+            raw->directive = dir;
+            raw->values.push_back(parse_expr());
+
+            while (check(COMMA)) {
+                expect(COMMA);
+
+                raw->values.push_back(parse_expr());
+            }
+
+            node->contents.push_back(move(raw));
+        } else if (check_value("asm"))
+            node->contents.push_back(parse_asm());
+        else if (check_value("fill")) {
+            expect(KEYWORD);
+
+            auto fill = make_unique<FillStmt>();
+
+            fill->target = parse_expr();
+
+            expect(COMMA);
+
+            fill->value = parse_expr();
+            node->contents.push_back(move(fill));
+        } else
             throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in section");
-    }
-
-    return node;
-}
-
-unique_ptr<ConvDecl> Parser::parse_conv() {
-    expect(KEYWORD);
-
-    auto node = make_unique<ConvDecl>();
-
-    node->name = expect(IDENT).value;
-
-    expect(COLON);
-    expect(KEYWORD);
-    expect(COLON);
-
-    if (check_value("null"))
-        consume();
-    else {
-        while (check_value("reg")) {
-            expect(KEYWORD);
-
-            node->arg_regs.push_back(expect(REG_NAME).value);
-        }
-    }
-
-    expect(KEYWORD);
-    expect(COLON);
-
-    if (check_value("null"))
-        consume();
-    else {
-        while (check_value("reg")) {
-            expect(KEYWORD);
-
-            node->ret_regs.push_back(expect(REG_NAME).value);
-        }
     }
 
     return node;
@@ -129,43 +124,7 @@ unique_ptr<ProcDecl> Parser::parse_proc() {
     node->name = expect(IDENT).value;
 
     expect(LPAREN);
-
-    while (!check(RPAREN)) {
-        auto param = make_unique<FieldDecl>();
-
-        param->name = expect(IDENT).value;
-
-        expect(COLON);
-
-        param->type = expect(TYPE).value;
-
-        node->params.push_back(move(param));
-    }
-
     expect(RPAREN);
-    expect(ARROW);
-    expect(LPAREN);
-
-    while (!check(RPAREN)) {
-        auto ret = make_unique<FieldDecl>();
-
-        ret->name = expect(IDENT).value;
-
-        expect(COLON);
-
-        ret->type = expect(TYPE).value;
-
-        node->rets.push_back(move(ret));
-    }
-
-    expect(RPAREN);
-    
-    if (check_value("using")) {
-        expect(KEYWORD);
-
-        node->calling_conv = expect(IDENT).value;
-    }
-
     expect(COLON);
 
     while (!at_end()) {
@@ -176,6 +135,10 @@ unique_ptr<ProcDecl> Parser::parse_proc() {
 
             break;
         }
+
+        if (check_value("section") || check_value("proc") || check_value("var") || check_value("const") || check_value("bits") || check_value("db")
+            || check_value("dw") || check_value("dd") || check_value("dq") || check_value("fill"))
+            break;
 
         node->body.push_back(parse_statement());
     }
@@ -223,6 +186,119 @@ unique_ptr<ConstDecl> Parser::parse_const() {
     expect(ASSIGN);
 
     node->value = parse_expr();
+
+    return node;
+}
+
+unique_ptr<MemRef> Parser::parse_memref() {
+    auto node = make_unique<MemRef>();
+
+    node->type = "u32";
+    node->segment = "";
+
+    if (check(TYPE)) {
+        node->type = expect(TYPE).value;
+
+        expect(COLON);
+    }
+
+    if (check(SEG_NAME)) {
+        node->segment = consume().value;
+        
+        expect(COLON);
+    }
+
+    if (check_value("reg")) {
+        expect(KEYWORD);
+
+        auto reg = make_unique<RegOperand>();
+
+        reg->name = expect(REG_NAME).value;
+        node->address = move(reg);
+    } else if (check(HEX_LITERAL)) {
+        auto lit = make_unique<HexLiteral>();
+
+        lit->value = stoull(consume().value, nullptr, 16);
+        node->address = move(lit);
+    } else if (check(INT_LITERAL)) {
+        auto lit = make_unique<IntLiteral>();
+
+        lit->value = stoull(consume().value);
+        node->address = move(lit);
+    } else if (check(IDENT)) {
+        auto ident = make_unique<Identifier>();
+
+        ident->name = consume().value;
+        node->address = move(ident);
+    } else
+        throw runtime_error("error on line " + to_string(peek().line) + ": expected address after '&'");
+
+    if (check(OPERATOR) && (peek().value == "+" || peek().value == "-")) {
+        string op = consume().value;
+        auto offset_expr = parse_expr();
+
+        if (op == "-") {
+            auto zero = make_unique<IntLiteral>();
+
+            zero->value = 0;
+
+            auto neg = make_unique<BinaryExpr>();
+
+            neg->op = "-";
+            neg->left = move(zero);
+            neg->right = move(offset_expr);
+            node->offset = move(neg);
+        } else
+            node->offset = move(offset_expr);
+    }
+
+    return node;
+}
+
+unique_ptr<DerefStmt> Parser::parse_deref() {
+    auto node = make_unique<DerefStmt>();
+
+    node->type = "u32";
+
+    if (check(TYPE)) {
+        node->type = expect(TYPE).value;
+
+        expect(COLON);
+    }
+
+    if (check_value("reg")) {
+        expect(KEYWORD);
+
+        auto reg = make_unique<RegOperand>();
+
+        reg->name = expect(REG_NAME).value;
+        node->ptr = move(reg);
+    } else if (check(IDENT)) {
+        auto ident = make_unique<Identifier>();
+
+        ident->name = consume().value;
+        node->ptr = move(ident);
+    } else
+        throw runtime_error("error on line " + to_string(peek().line) + ": expected pointer after '*'");
+    
+    if (check(OPERATOR) && (peek().value == "+" || peek().value == "-")) {
+        string op = consume().value;
+
+        node->offset = parse_expr();
+
+        if (op == "-") {
+            auto zero = make_unique<IntLiteral>();
+
+            zero->value = 0;
+
+            auto neg = make_unique<BinaryExpr>();
+
+            neg->op = "-";
+            neg->left = move(zero);
+            neg->right = move(node->offset);
+            node->offset = move(neg);
+        }
+    }
 
     return node;
 }
@@ -300,12 +376,22 @@ unique_ptr<ASTNode> Parser::parse_statement() {
         return make_unique<RetStmt>();
     }
 
-    if (check_value("exit")) {
+    if (check_value("syscall")) {
         expect(KEYWORD);
 
-        auto node = make_unique<ExitStmt>();
+        return make_unique<SyscallStmt>();
+    }
 
-        node->code = parse_expr();
+    if (check_value("out")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<OutStmt>();
+
+        node->port = parse_expr();
+
+        expect(COMMA);
+
+        node->value = parse_expr();
 
         return node;
     }
@@ -347,6 +433,68 @@ unique_ptr<ASTNode> Parser::parse_statement() {
         return node;
     }
 
+    if (check_value("seg")) {
+        auto lhs = parse_lhs();
+
+        expect(ASSIGN);
+
+        auto rhs = parse_expr();
+        auto node = make_unique<AssignStmt>();
+
+        node->lhs = move(lhs);
+        node->rhs = move(rhs);
+
+        return node;
+    }
+
+    if (check_value("cli")) {
+        expect(KEYWORD);
+
+        return make_unique<CliStmt>();
+    }
+
+    if (check_value("sti")) {
+        expect(KEYWORD);
+
+        return make_unique<StiStmt>();
+    }
+
+    if (check_value("hlt")) {
+        expect(KEYWORD);
+
+        return make_unique<HltStmt>();
+    }
+
+    if (check(AMPERSAND)) {
+        auto lhs = parse_lhs();
+
+        expect(ASSIGN);
+
+        auto rhs = parse_expr();
+        auto node = make_unique<AssignStmt>();
+
+        node->lhs = move(lhs);
+        node->rhs = move(rhs);
+
+        return node;
+    }
+
+    if (check(STAR)) {
+        expect(STAR);
+
+        auto lhs = parse_deref();
+
+        expect(ASSIGN);
+
+        auto rhs = parse_expr();
+        auto node = make_unique<AssignStmt>();
+
+        node->lhs = move(lhs);
+        node->rhs = move(rhs);
+
+        return node;
+    }
+
     if (check(IDENT)) {
         auto lhs = parse_lhs();
 
@@ -373,6 +521,13 @@ unique_ptr<ASTNode> Parser::parse_expr() {
         auto node = make_unique<RegOperand>();
 
         node->name = expect(REG_NAME).value;
+        left = move(node);
+    } else if (check_value("seg")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<SegOperand>();
+
+        node->name = expect(SEG_NAME).value;
         left = move(node);
     } else if (check(HEX_LITERAL)) {
         auto node = make_unique<HexLiteral>();
@@ -410,10 +565,55 @@ unique_ptr<ASTNode> Parser::parse_expr() {
 
         node->name = consume().value;
         left = move(node);
+    } else if (check(AMPERSAND)) {
+        expect(AMPERSAND);
+
+        left = parse_memref();
+    } else if (check(STAR)) {
+        expect(STAR);
+
+        left = parse_deref();
+    } else if (check(OPERATOR) && peek().value == "~") {
+        consume();
+
+        auto node = make_unique<UnaryExpr>();
+
+        node->op = "~";
+        node->operand = parse_expr();
+        left = move(node);
+    } else if (check_value("addr")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<AddrOf>();
+
+        node->name = expect(IDENT).value;
+        left = move(node);
+    } else if (check_value("in")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<InStmt>();
+
+        node->port = parse_expr();
+        left = move(node);
     } else
         throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in expression");
     
-    if (check(OPERATOR)) {
+    uint32_t left_line = tokens[pos > 0 ? pos - 1 : 0].line;
+    
+    if (check(AMPERSAND) && peek().line == left_line) {
+        auto node = make_unique<BinaryExpr>();
+
+        node->op = "&";
+
+        consume();
+
+        node->left = move(left);
+        node->right = parse_expr();
+
+        return node;
+    }
+    
+    if (check(OPERATOR) && peek().line == left_line) {
         auto node = make_unique<BinaryExpr>();
 
         node->op = consume().value;
@@ -433,6 +633,16 @@ unique_ptr<ASTNode> Parser::parse_lhs() {
         auto node = make_unique<RegOperand>();
 
         node->name = expect(REG_NAME).value;
+
+        return node;
+    }
+
+    if (check_value("seg")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<SegOperand>();
+
+        node->name = expect(SEG_NAME).value;
 
         return node;
     }
@@ -471,6 +681,12 @@ unique_ptr<ASTNode> Parser::parse_lhs() {
         return node;
     }
 
+    if (check(AMPERSAND)) {
+        expect(AMPERSAND);
+
+        return parse_memref();
+    }
+
     throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in lhs");
 }
 
@@ -502,14 +718,14 @@ string Parser::get_type(token_type_t type) {
         case TYPE:
             return "TYPE";
         
-        case ARROW:
-            return "->";
-        
         case COLON:
             return ":";
         
         case DOT:
             return ".";
+        
+        case COMMA:
+            return ",";
         
         case LPAREN:
             return "(";
@@ -523,14 +739,20 @@ string Parser::get_type(token_type_t type) {
         case RBRACK:
             return "]";
         
+        case ASSIGN:
+            return "=";
+
+        case AMPERSAND:
+            return "&";
+        
         case OPERATOR:
             return "OPERATOR";
         
         case REG_NAME:
             return "REG_NAME";
         
-        case ASSIGN:
-            return "=";
+        case SEG_NAME:
+            return "SEG_NAME";
         
         case SECTION_NAME:
             return "SECTION_NAME";
@@ -540,6 +762,12 @@ string Parser::get_type(token_type_t type) {
         
         case HEX_LITERAL:
             return "HEX_LITERAL";
+
+        case STRING_LITERAL:
+            return "STRING_LITERAL";
+        
+        default:
+            return "UNKOWN";
     }
 }
 

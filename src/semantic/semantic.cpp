@@ -103,17 +103,6 @@ void SemanticAnalyzer::collect_sections(SectionDecl &section) {
             } catch (const runtime_error &e) {
                 report(e.what());
             }
-        } else if (auto *conv = dynamic_cast<ConvDecl *>(node.get())) {
-            symbol_t sym;
-
-            sym.kind = symbol_t::Kind::CONV;
-            sym.name = conv->name;
-
-            try {
-                globals.declare(conv->name, sym);
-            } catch (const runtime_error &e) {
-                report(e.what());
-            }
         } else if (auto *proc = dynamic_cast<ProcDecl *>(node.get())) {
             symbol_t sym;
 
@@ -125,6 +114,12 @@ void SemanticAnalyzer::collect_sections(SectionDecl &section) {
             } catch (const runtime_error &e) {
                 report(e.what());
             }
+        } else if (dynamic_cast<BitsStmt *>(node.get())) {
+
+        } else if (dynamic_cast<RawData *>(node.get())) {
+
+        } else if (dynamic_cast<FillStmt *>(node.get())) {
+
         }
     }
 }
@@ -142,15 +137,6 @@ void SemanticAnalyzer::check_proc(ProcDecl &proc) {
     locals = SymbolTable();
     in_loop = false;
     curr_proc = proc.name;
-
-    if (!proc.calling_conv.empty()) {
-        auto *sym = globals.lookup(proc.calling_conv);
-
-        if (!sym)
-            report("proc '" + proc.name + "' uses unknown conv '" + proc.calling_conv + "'");
-        else if (sym->kind != symbol_t::Kind::CONV)
-            report("'" + proc.calling_conv + "' is not a conv");
-    }
 
     for (const auto &stmt : proc.body)
         check_statement(*stmt);
@@ -204,16 +190,31 @@ void SemanticAnalyzer::check_statement(ASTNode &node) {
         check_loop(*loop);
     else if (auto *frame = dynamic_cast<FrameBlock *>(&node))
         check_frame(*frame);
-    else if (dynamic_cast<BreakStmt *>(&node)) {
+    else if (auto *out = dynamic_cast<OutStmt *>(&node)) {
+        resolve_type(*out->port);
+        resolve_type(*out->value);
+    } else if (dynamic_cast<BreakStmt *>(&node)) {
         if (!in_loop)
             report("'break' used outside of loop in proc' " + curr_proc + "'");
-    } else if (auto *ex = dynamic_cast<ExitStmt *>(&node))
-        resolve_type(*ex->code);
-    else if (dynamic_cast<RetStmt *>(&node)) {
+    } else if (dynamic_cast<RetStmt *>(&node)) {
 
     } else if (dynamic_cast<AsmBlock *>(&node)) {
         
-    } else
+    } else if (dynamic_cast<SyscallStmt *>(&node)) {
+
+    } else if (dynamic_cast<CliStmt *>(&node)) {
+
+    } else if (dynamic_cast<StiStmt *>(&node)) {
+
+    } else if (dynamic_cast<HltStmt *>(&node)) {
+
+    } else if (dynamic_cast<MemRef *>(&node))
+        report("memory reference used as statement with no assignment in proc '" + curr_proc + "'");
+    else if (dynamic_cast<DerefStmt *>(&node))
+        report("dereference used as statement with no assignment in proc '" + curr_proc + "'");
+    else if (dynamic_cast<UnaryExpr *>(&node))
+        report("unary expression used as statement with no assignment in proc '" + curr_proc + "'");
+    else
         report("unknown statement in proc '" + curr_proc + "'");
 }
 
@@ -253,6 +254,19 @@ void SemanticAnalyzer::check_assign(AssignStmt &node) {
             report("assignment to undeclared variable '" + ident->name + "'");
     } else if (dynamic_cast<RegOperand *>(node.lhs.get())) {
 
+    } else if (dynamic_cast<SegOperand *>(node.lhs.get())) {
+
+    } else if (auto *memref = dynamic_cast<MemRef *>(node.lhs.get())) {
+        if (memref->address)
+            resolve_type(*memref->address);
+    } else if (auto *deref = dynamic_cast<DerefStmt *>(node.lhs.get())) {
+        if (auto *ident = dynamic_cast<Identifier *>(deref->ptr.get())) {
+            if (!locals.lookup(ident->name) && !globals.lookup(ident->name))
+                report("unknown pointer variable '" + ident->name + "' in dereference");
+        }
+
+        if (deref->offset)
+            resolve_type(*deref->offset);
     }
 }
 
@@ -265,6 +279,53 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
     
     if (dynamic_cast<RegOperand *>(&expr))
         return "u32";
+    
+    if (dynamic_cast<SegOperand *>(&expr))
+        return "u16";
+    
+    if (auto *memref = dynamic_cast<MemRef *>(&expr)) {
+        if (memref->address)
+            resolve_type(*memref->address);
+        
+        if (memref->offset)
+            resolve_type(*memref->offset);
+        
+        return memref->type.empty() ? "u32" : memref->type;
+    }
+
+    if (auto *deref = dynamic_cast<DerefStmt *>(&expr)) {
+        if (auto *ident = dynamic_cast<Identifier *>(deref->ptr.get())) {
+            auto *sym = locals.lookup(ident->name);
+
+            if (!sym)
+                sym = globals.lookup(ident->name);
+            
+            if (!sym) {
+                report("use of undeclared identifier '" + ident->name + "'");
+
+                return "unknown";
+            }
+        } else if (dynamic_cast<RegOperand *>(deref->ptr.get())) {
+
+        }
+
+        if (deref->offset)
+            resolve_type(*deref->offset);
+        
+        return deref->type.empty() ? "u32" : deref->type;
+    }
+
+    if (auto *addr = dynamic_cast<AddrOf *>(&expr)) {
+        auto *sym = locals.lookup(addr->name);
+
+        if (!sym)
+            sym = globals.lookup(addr->name);
+
+        if (!sym)
+            report("unknown variable '" + addr->name + "' in addr expression");
+            
+        return "u32";
+    }
     
     if (auto *ident = dynamic_cast<Identifier *>(&expr)) {
         auto *sym = locals.lookup(ident->name);
@@ -319,6 +380,15 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
             return "u1";
         
         return resolve_type(*bin->left);
+    }
+
+    if (auto *unary = dynamic_cast<UnaryExpr *>(&expr))
+        return resolve_type(*unary->operand);
+    
+    if (auto *in = dynamic_cast<InStmt *>(&expr)) {
+        resolve_type(*in->port);
+
+        return "u32";
     }
 
     report("unresolved expression type");

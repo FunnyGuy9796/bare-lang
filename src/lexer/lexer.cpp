@@ -1,7 +1,9 @@
 #include "lexer.h"
 
 static const vector<string> KEYWORDS = {
-    "data", "end", "section", "const", "var", "conv", "proc", "when", "ret", "reg", "frame", "loop", "break", "args", "using", "null", "exit", "asm"
+    "data", "end", "section", "const", "var", "proc", "when", "ret", "reg", "seg",
+    "frame", "loop", "break", "args", "null", "asm", "syscall", "addr", "in", "out",
+    "cli", "sti", "hlt", "bits", "db", "dw", "dd", "dq", "fill"
 };
 
 static const vector<string> TYPES = {
@@ -9,11 +11,18 @@ static const vector<string> TYPES = {
 };
 
 static const vector<string> REG_NAMES = {
-    "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp"
+    "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
+    "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
+    "al", "ah", "bl", "bh", "cl", "ch", "dl", "dh"
+};
+
+static const vector<string> SEG_NAMES = {
+    "cs", "ds", "ss", "es", "fs", "gs"
 };
 
 static const vector<string> OPERATORS = {
-    ">", "<", ">=", "<=", "==", "!=", "+", "-", "++", "--"
+    ">", "<", ">=", "<=", "==", "!=", "+", "-", "++", "--",
+    "|", "^", "<<", ">>", "~"
 };
 
 token_type_t Lexer::classify(const string &value) {
@@ -32,6 +41,11 @@ token_type_t Lexer::classify(const string &value) {
             return REG_NAME;
     }
 
+    for (const auto &s : SEG_NAMES) {
+        if (value == s)
+            return SEG_NAME;
+    }
+
     for (const auto &o : OPERATORS) {
         if (value == o)
             return OPERATOR;
@@ -46,8 +60,14 @@ token_type_t Lexer::classify(const string &value) {
     if (value == ".")
         return DOT;
     
-    if (value == "->")
-        return ARROW;
+    if (value == ",")
+        return COMMA;
+    
+    if (value == "&")
+        return AMPERSAND;
+    
+    if (value == "*")
+        return STAR;
     
     if (value == "(")
         return LPAREN;
@@ -107,16 +127,30 @@ static vector<string> split_lexum(const string &raw) {
                 parts.push_back(".");
             } else
                 curr.push_back(c);
-        } else if (c == '-' && i + 1 < raw.size() && raw[i + 1] == '>') {
+        } else if (c == ',') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+                
+                curr = "";
+            }
+            
+            parts.push_back(",");
+        } else if (c == '&') {
             if (!curr.empty()) {
                 parts.push_back(curr);
 
                 curr = "";
             }
 
-            parts.push_back("->");
+            parts.push_back("&");
+        } else if (c == '*') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
 
-            i++;
+                curr = "";
+            }
+
+            parts.push_back("*");
         } else if ((c == '+' || c == '-' || c == '=') && i + 1 < raw.size() && raw[i + 1] == c) {
             if (!curr.empty()) {
                 parts.push_back(curr);
@@ -127,6 +161,34 @@ static vector<string> split_lexum(const string &raw) {
             parts.push_back(string(2, c));
 
             i++;
+        } else if (c == '<' && i + 1 < raw.size() && raw[i + 1] == '<') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+
+                curr = "";
+            }
+
+            parts.push_back("<<");
+
+            i++;
+        } else if (c == '>' && i + 1 < raw.size() && raw[i + 1] == '>') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+
+                curr = "";
+            }
+
+            parts.push_back(">>");
+
+            i++;
+        } else if (c == '|' || c == '^' || c == '~') {
+            if (!curr.empty()) {
+                parts.push_back(curr);
+
+                curr = "";
+            }
+
+            parts.push_back(string(1, c));
         } else if (c == '>' || c == '<') {
             if (!curr.empty()) {
                 parts.push_back(curr);
@@ -174,6 +236,78 @@ vector<token_t> Lexer::lex_file(map<uint32_t, string> &content) {
                 break;
             }
 
+            if (c == '\'') {
+                if (!curr_token.empty()) {
+                    for (const auto &part : split_lexum(curr_token))
+                        tokens.push_back({ classify(part), part, line_num });
+
+                    curr_token.clear();
+                }
+
+                i++;
+
+                uint8_t val = 0;
+
+                if (i < line_content.size() && line_content[i] != '\'') {
+                    char ch = line_content[i];
+
+                    val = (uint8_t)ch;
+
+                    if (ch == '\\' && i + 1 < line_content.size()) {
+                        i++;
+
+                        switch (line_content[i]) {
+                            case 'n': {
+                                val = '\n';
+                                
+                                break;
+                            }
+
+                            case 't': {
+                                val = '\t';
+                                
+                                break;
+                            }
+
+                            case 'r': {
+                                val = '\r';
+                                
+                                break;
+                            }
+
+                            case '0': {
+                                val = '\0';
+                                
+                                break;
+                            }
+
+                            case '\\': {
+                                val = '\\';
+                                
+                                break;
+                            }
+                            case '\'': {
+                                val = '\'';
+                                
+                                break;
+                            }
+
+                            default: {
+                                val = line_content[i];
+                                
+                                break;
+                            }
+                        }
+                    }
+
+                    i++;
+                }
+
+                tokens.push_back({ INT_LITERAL, to_string(val), line_num });
+                
+                continue;
+            }
+
             if (c == '"') {
                 if (!curr_token.empty()) {
                     for (const auto &part : split_lexum(curr_token))
@@ -193,7 +327,7 @@ vector<token_t> Lexer::lex_file(map<uint32_t, string> &content) {
 
                 tokens.push_back({ STRING_LITERAL, str_val, line_num });
 
-                break;
+                continue;
             }
 
             if (c == '\n' || c == '\r' || c == '\t' || c == ' ') {

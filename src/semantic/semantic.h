@@ -11,7 +11,7 @@
 using namespace std;
 
 typedef struct {
-    enum class Kind { DATA, VAR, CONST, PROC, CONV } kind;
+    enum class Kind { DATA, VAR, CONST, PROC } kind;
     string name;
     string type;
     bool is_array = false;

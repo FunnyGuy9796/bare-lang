@@ -24,10 +24,11 @@ private:
 
     unique_ptr<DataDecl> parse_data_decl();
     unique_ptr<SectionDecl> parse_section();
-    unique_ptr<ConvDecl> parse_conv();
     unique_ptr<ProcDecl> parse_proc();
     unique_ptr<VarDecl> parse_var();
     unique_ptr<ConstDecl> parse_const();
+    unique_ptr<MemRef> parse_memref();
+    unique_ptr<DerefStmt> parse_deref();
     unique_ptr<FrameBlock> parse_frame();
     unique_ptr<LoopBlock> parse_loop();
     unique_ptr<WhenBlock> parse_when();

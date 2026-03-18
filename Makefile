@@ -1,5 +1,11 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
+CXXFLAGS := -std=c++17 -Wall -Wextra
+
+ifdef DEBUG
+    CXXFLAGS += -g -O0
+else
+    CXXFLAGS += -O2
+endif
 
 SRC_DIR := src
 OBJ_DIR := obj

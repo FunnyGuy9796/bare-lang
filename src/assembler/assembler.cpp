@@ -49,14 +49,8 @@ int Assembler::run(const vector<string> &args, string &err_output) {
     return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
 
-bool Assembler::assemble(const string &asm_file, const string &obj_file, string &err) {
+bool Assembler::assemble(const string &asm_file, const string &obj_file, string &err, bool binary) {
     int ret = run({"nasm", "-f", "elf32", asm_file, "-o", obj_file}, err);
-
-    return ret == 0;
-}
-
-bool Assembler::link(const string &obj_file, const string &out_file, string &err) {
-    int ret = run({"ld", "-m", "elf_i386", "-o", out_file, obj_file}, err);
 
     return ret == 0;
 }

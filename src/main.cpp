@@ -11,23 +11,64 @@
 using namespace std;
 
 vector<string> input_names;
-string output_name("out");
+string output_name = "";
 
 bool rec_input = false;
 bool rec_output = false;
+bool emit_asm = false;
+
+void print_help() {
+    cout << "Usage: bare-compiler -b <files...> [-o <output>] [options]\n\n";
+    cout << "Input:\n";
+    cout << "  -b <files...>     specify input .bare source files\n\n";
+    cout << "Output:\n";
+    cout << "  -o <output>       specify output file name (default: out.o)\n";
+    cout << "  -S                emit assembly only (.asm)\n\n";
+    cout << "Options:\n";
+    cout << "  -h, --help        show this help message\n";
+    cout << "  -v, --version     show compiler version\n\n";
+    cout << "Examples:\n";
+    cout << "  bare-compiler -b main.bare -o main.o\n";
+    cout << "  bare-compiler -b main.bare -S -o main.asm\n\n";
+    cout << "Linking examples:\n";
+    cout << "  Linux ELF32:\n";
+    cout << "    ld -m elf_i386 -o program main.o\n\n";
+    cout << "  Bootloader:\n";
+    cout << "    ld -m elf_i386 --oformat binary -Ttext 0x7C00 -o boot.bin boot.o\n\n";
+    cout << "  With GCC:\n";
+    cout << "    gcc -m32 -nostdlib -o program main.o\n";
+}
+
+void print_version() {
+    cout << "bare-compiler 0.1.0\n";
+}
 
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         string str(argv[i]);
 
-        if (str == "-b") {
+        if (str == "-h" || str == "--help") {
+            print_help();
+
+            return 0;
+        } else if (str == "-v" || str == "--version") {
+            print_version();
+
+            return 0;
+        } else if (str == "-b") {
             rec_input = true;
+            rec_output = false;
 
             continue;
         } else if (str == "-o") {
             rec_input = false;
             rec_output = true;
             
+            continue;
+        } else if (str == "-S") {
+            emit_asm = true;
+            rec_output = false;
+
             continue;
         }
 
@@ -36,6 +77,15 @@ int main(int argc, char **argv) {
         else if (rec_output)
             output_name = str;
     }
+
+    if (argc == 1) {
+        print_help();
+
+        return 0;
+    }
+
+    if (output_name.empty())
+        output_name = emit_asm ? "out.asm" : "out.o";
     
     if (input_names.empty()) {
         cerr << "no input files provided" << endl;
@@ -84,12 +134,28 @@ int main(int argc, char **argv) {
 
     CodeGen code_gen(semantic.get_globals());
     string asm_output = code_gen.generate(*program);
-    string asm_name = output_name + ".asm";
-    string obj_name = output_name + ".o";
-    ofstream asm_file(asm_name);
+
+    if (emit_asm) {
+        ofstream asm_file(output_name);
+
+        if (!asm_file.is_open()) {
+            cerr << "coult not create '" << output_name << "'" << endl;
+
+            return 1;
+        }
+
+        asm_file << asm_output;
+
+        cout << "compiled successfully -> " << output_name << endl;
+
+        return 0;
+    }
+
+    string tmp_asm = output_name + ".tmp.asm";
+    ofstream asm_file(tmp_asm);
 
     if (!asm_file.is_open()) {
-        cerr << "could not create .asm file" << endl;
+        cerr << "could not create temp .asm file" << endl;
 
         return 1;
     }
@@ -100,20 +166,15 @@ int main(int argc, char **argv) {
     Assembler assembler;
     string err;
 
-    if (!assembler.assemble(asm_name, obj_name, err)) {
+    if (!assembler.assemble(tmp_asm, output_name, err)) {
         cerr << "assembly failed:\n" << err << endl;
 
-        return 1;
-    }
-
-    if (!assembler.link(obj_name, output_name, err)) {
-        cerr << "linking failed:\n" << err << endl;
+        remove(tmp_asm.c_str());
 
         return 1;
     }
 
-    remove(asm_name.c_str());
-    remove(obj_name.c_str());
+    remove(tmp_asm.c_str());
 
     cout << "compiled successfully -> " << output_name << endl;
 

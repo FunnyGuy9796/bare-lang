@@ -68,14 +68,20 @@ void CodeGen::gen_section(SectionDecl &section) {
     out << "section " << section.name << "\n";
 
     for (const auto &node : section.contents) {
-        if (auto *var = dynamic_cast<VarDecl *>(node.get()))
+        if (auto *bits = dynamic_cast<BitsStmt *>(node.get()))
+            out << "bits " << bits->width << "\n";
+        else if (auto *var = dynamic_cast<VarDecl *>(node.get()))
             gen_var_bss(*var);
         else if (auto *cn = dynamic_cast<ConstDecl *>(node.get()))
             gen_const(*cn);
-        else if (auto *conv = dynamic_cast<ConvDecl *>(node.get()))
-            gen_conv(*conv);
         else if (auto *proc = dynamic_cast<ProcDecl *>(node.get()))
             gen_proc(*proc);
+        else if (auto *raw = dynamic_cast<RawData *>(node.get()))
+            gen_raw_data(*raw);
+        else if (auto *a = dynamic_cast<AsmBlock *>(node.get()))
+            gen_asm(*a);
+        else if (auto *fill = dynamic_cast<FillStmt *>(node.get()))
+            gen_fill(*fill);
     }
 }
 
@@ -110,10 +116,6 @@ void CodeGen::gen_const(ConstDecl &decl) {
     out << "    " << decl.name << ": " << dbX << " " << val << "\n";
 }
 
-void CodeGen::gen_conv(ConvDecl &decl) {
-    out << "    ; conv " << decl.name << "\n";
-}
-
 void CodeGen::gen_proc(ProcDecl &decl) {
     if (decl.name == "_start")
         out << "global _start\n";
@@ -139,16 +141,23 @@ void CodeGen::gen_statement(ASTNode &node, const string &break_label) {
         gen_incr(*incr);
     else if (auto *call = dynamic_cast<ProcCall *>(&node))
         gen_call(*call);
-    else if (auto *ex = dynamic_cast<ExitStmt *>(&node))
-        gen_exit(*ex);
     else if (auto *a = dynamic_cast<AsmBlock *>(&node))
         gen_asm(*a);
+    else if (auto *o = dynamic_cast<OutStmt *>(&node))
+        gen_out(*o);
+    else if (dynamic_cast<SyscallStmt *>(&node))
+        out << "    int 0x80\n";
     else if (dynamic_cast<RetStmt *>(&node))
         out << "    ret\n";
     else if (dynamic_cast<BreakStmt *>(&node)) {
         if (!break_label.empty())
             out << "    jmp " << break_label << "\n";
-    }
+    } else if (dynamic_cast<CliStmt *>(&node))
+        out << "    cli\n";
+    else if (dynamic_cast<StiStmt *>(&node))
+        out << "    sti\n";
+    else if (dynamic_cast<HltStmt *>(&node))
+        out << "    hlt\n";
 }
 
 void CodeGen::gen_frame(FrameBlock &node, const string &break_label) {
@@ -278,7 +287,18 @@ void CodeGen::gen_assign(AssignStmt &node) {
     }
 
     string lhs = gen_lhs(*node.lhs);
-    string rhs = gen_operand(*node.rhs);
+    string lhs_type = "u32";
+
+    if (auto *memref = dynamic_cast<MemRef *>(node.lhs.get()))
+        lhs_type = memref->type;
+    else if (auto *reg = dynamic_cast<RegOperand *>(node.lhs.get())) {
+        if (reg->name.back() == 'l' || reg->name.back() == 'h')
+            lhs_type = "u8";
+        else if (reg->name.size() == 2 && reg->name[0] != 'e')
+            lhs_type = "u16";
+    }
+
+    string rhs = gen_operand(*node.rhs, lhs_type);
 
     out << "    mov " << lhs << ", " << rhs << "\n";
 }
@@ -299,20 +319,24 @@ void CodeGen::gen_call(ProcCall &node) {
     out << "    call " << node.name << "\n";
 }
 
-void CodeGen::gen_exit(ExitStmt &node) {
-    string code = gen_operand(*node.code);
-
-    out << "    mov eax, 1\n";
-    out << "    mov ebx, " << code << "\n";
-    out << "    int 0x80\n";
-}
-
 void CodeGen::gen_asm(AsmBlock &node) {
     for (const auto &line : node.lines)
         out << "    " << line << "\n";
 }
 
-string CodeGen::gen_operand(ASTNode &expr) {
+void CodeGen::gen_out(OutStmt &node) {
+    string port = gen_operand(*node.port);
+    string value = gen_operand(*node.value);
+
+    if (dynamic_cast<IntLiteral *>(node.port.get()) || dynamic_cast<HexLiteral *>(node.port.get()))
+        out << "    out " << port << ", " << value << "\n";
+    else {
+        out << "    mov dx, " << port << "\n";
+        out << "    out dx, " << value << "\n";
+    }
+}
+
+string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
     if (auto *i = dynamic_cast<IntLiteral *>(&expr))
         return to_string(i->value);
     
@@ -326,6 +350,43 @@ string CodeGen::gen_operand(ASTNode &expr) {
 
     if (auto *reg = dynamic_cast<RegOperand *>(&expr))
         return reg->name;
+    
+    if (auto *seg = dynamic_cast<SegOperand *>(&expr))
+        return seg->name;
+    
+    if (auto *memref = dynamic_cast<MemRef *>(&expr)) {
+        string sw = size_word(memref->type);
+        string addr = gen_memref_addr(*memref);
+
+        return sw + " [" + addr + "]";
+    }
+
+    if (auto *deref = dynamic_cast<DerefStmt *>(&expr)) {
+        string sw = size_word(deref->type);
+        string ptr_val = gen_operand(*deref->ptr);
+
+        out << "    mov edx, " << ptr_val << "\n";
+
+        if (deref->offset) {
+            string off = gen_operand(*deref->offset);
+
+            return sw + " [edx + " + off + "]";
+        }
+
+        return sw + " [edx]";
+    }
+
+    if (auto *addr = dynamic_cast<AddrOf *>(&expr)) {
+        if (local_offsets.count(addr->name)) {
+            int offset = local_offsets[addr->name];
+            
+            out << "    lea eax, [ebp" << (offset < 0 ? " - " : " + ") << to_string(abs(offset)) << "]\n";
+
+            return "eax";
+        }
+        
+        return addr->name;
+    }
     
     if (auto *ident = dynamic_cast<Identifier *>(&expr)) {
         if (local_offsets.count(ident->name)) {
@@ -365,12 +426,96 @@ string CodeGen::gen_operand(ASTNode &expr) {
         return sw + " [" + arr->name + " + " + idx_reg + " * " + to_string(elem_size) + "]";
     }
 
+    if (auto *unary = dynamic_cast<UnaryExpr *>(&expr)) {
+        string operand = gen_operand(*unary->operand);
+        string acc = size_reg("eax", size_hint);
+
+        if (unary->op == "~") {
+            out << "    mov " << acc << ", " << operand << "\n";
+            out << "    not " << acc << "\n";
+
+            return acc;
+        }
+
+        return operand;
+    }
+
+    if (auto *bin = dynamic_cast<BinaryExpr *>(&expr)) {
+        string left  = gen_operand(*bin->left,  size_hint);
+        string right = gen_operand(*bin->right, size_hint);
+        string acc   = size_reg("eax", size_hint);
+
+        out << "    mov " << acc << ", " << left << "\n";
+
+        if (bin->op == "&")
+            out << "    and " << acc << ", " << right << "\n";
+        else if (bin->op == "|")
+            out << "    or "  << acc << ", " << right << "\n";
+        else if (bin->op == "^")
+            out << "    xor " << acc << ", " << right << "\n";
+        else if (bin->op == "+")
+            out << "    add " << acc << ", " << right << "\n";
+        else if (bin->op == "-")
+            out << "    sub " << acc << ", " << right << "\n";
+        else if (bin->op == "<<" || bin->op == ">>") {
+            string instr = (bin->op == "<<") ? "shl" : "shr";
+
+            if (dynamic_cast<IntLiteral *>(bin->right.get()))
+                out << "    " << instr << " " << acc << ", " << right << "\n";
+            else {
+                out << "    mov cl, " << right << "\n";
+                out << "    " << instr << " " << acc << ", cl\n";
+            }
+        }
+
+        return acc;
+    }
+
+    if (auto *in = dynamic_cast<InStmt *>(&expr)) {
+        string port = gen_operand(*in->port);
+        string acc  = size_reg("eax", size_hint);
+
+        if (dynamic_cast<IntLiteral *>(in->port.get()) || dynamic_cast<HexLiteral *>(in->port.get()))
+            out << "    in " << acc << ", " << port << "\n";
+        else {
+            out << "    mov dx, " << port << "\n";
+            out << "    in " << acc << ", dx\n";
+        }
+
+        return acc;
+    }
+
     return "0";
 }
 
 string CodeGen::gen_lhs(ASTNode &expr) {
     if (auto *reg = dynamic_cast<RegOperand *>(&expr))
         return reg->name;
+    
+    if (auto *seg = dynamic_cast<SegOperand *>(&expr))
+        return seg->name;
+    
+    if (auto *memref = dynamic_cast<MemRef *>(&expr)) {
+        string sw = size_word(memref->type);
+        string addr = gen_memref_addr(*memref);
+
+        return sw + " [" + addr + "]";
+    }
+
+    if (auto *deref = dynamic_cast<DerefStmt *>(&expr)) {
+        string sw = size_word(deref->type);
+        string ptr_val = gen_operand(*deref->ptr);
+
+        out << "    mov edx, " + ptr_val << "\n";
+
+        if (deref->offset) {
+            string off = gen_operand(*deref->offset);
+
+            return sw + " [edx + " + off + "]";
+        }
+
+        return sw + "[edx]";
+    }
     
     if (auto *ident = dynamic_cast<Identifier *>(&expr)) {
         if (local_offsets.count(ident->name)) {
@@ -461,4 +606,113 @@ string CodeGen::gen_member(const string &object, const string &member) {
         return sw + " [" + object + "]";
 
     return sw + " [" + object + " + " + to_string(field_offset) + "]";
+}
+
+string CodeGen::gen_address(ASTNode &expr) {
+    if (auto *h = dynamic_cast<HexLiteral *>(&expr)) {
+        stringstream ss;
+
+        ss << "0x" << hex << h->value;
+
+        return ss.str();
+    }
+
+    if (auto *i = dynamic_cast<IntLiteral *>(&expr))
+        return to_string(i->value);
+
+    if (auto *reg = dynamic_cast<RegOperand *>(&expr))
+        return reg->name;
+
+    if (auto *ident = dynamic_cast<Identifier *>(&expr))
+        return ident->name;
+
+    return "0";
+}
+
+string CodeGen::gen_memref_addr(MemRef &memref) {
+    string addr = gen_address(*memref.address);
+
+    if (memref.offset) {
+        if (auto *bin = dynamic_cast<BinaryExpr *>(memref.offset.get())) {
+            if (bin->op == "-") {
+                string off = gen_operand(*bin->right);
+
+                return (memref.segment.empty() ? "" : memref.segment + ":") + addr + " - " + off;
+            }
+        }
+
+        string off = gen_operand(*memref.offset);
+
+        return (memref.segment.empty() ? "" : memref.segment + ":") + addr + " + " + off;
+    }
+
+    if (!memref.segment.empty())
+        return memref.segment + ":" + addr;
+
+    return addr;
+}
+
+string CodeGen::size_reg(const string &reg, const string &type) {
+    int size = type_size(type);
+
+    static const map<string, array<string, 3>> reg_map = {
+        {"eax", {"al",  "ax",  "eax"}},
+        {"ebx", {"bl",  "bx",  "ebx"}},
+        {"ecx", {"cl",  "cx",  "ecx"}},
+        {"edx", {"dl",  "dx",  "edx"}},
+        {"esi", {"",    "si",  "esi"}},
+        {"edi", {"",    "di",  "edi"}},
+        {"esp", {"",    "sp",  "esp"}},
+        {"ebp", {"",    "bp",  "ebp"}},
+    };
+
+    static const map<string, string> to_base = {
+        {"al", "eax"}, {"ah", "eax"}, {"ax", "eax"}, {"eax", "eax"},
+        {"bl", "ebx"}, {"bh", "ebx"}, {"bx", "ebx"}, {"ebx", "ebx"},
+        {"cl", "ecx"}, {"ch", "ecx"}, {"cx", "ecx"}, {"ecx", "ecx"},
+        {"dl", "edx"}, {"dh", "edx"}, {"dx", "edx"}, {"edx", "edx"},
+        {"si", "esi"}, {"esi", "esi"},
+        {"di", "edi"}, {"edi", "edi"},
+        {"sp", "esp"}, {"esp", "esp"},
+        {"bp", "ebp"}, {"ebp", "ebp"},
+    };
+
+    auto base_it = to_base.find(reg);
+
+    if (base_it == to_base.end())
+        return reg;
+
+    string base = base_it->second;
+    auto map_it = reg_map.find(base);
+
+    if (map_it == reg_map.end())
+        return reg;
+
+    if (size == 1)
+        return map_it->second[0];
+
+    if (size == 2)
+        return map_it->second[1];
+
+    return map_it->second[2];
+}
+
+void CodeGen::gen_raw_data(RawData &node) {
+    out << "    " << node.directive;
+
+    for (size_t i = 0; i < node.values.size(); i++) {
+        if (i > 0)
+            out << ",";
+
+        out << " " << gen_operand(*node.values[i]);
+    }
+
+    out << "\n";
+}
+
+void CodeGen::gen_fill(FillStmt &node) {
+    string target = gen_operand(*node.target);
+    string value = gen_operand(*node.value);
+
+    out << "    times " << target << "-($-$$) db " << value << "\n";
 }

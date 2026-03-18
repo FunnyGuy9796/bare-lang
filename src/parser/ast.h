@@ -21,17 +21,10 @@ struct DataDecl : ASTNode {
     vector<unique_ptr<FieldDecl>> fields;
 };
 
-struct ConvDecl : ASTNode {
-    string name;
-    vector<string> arg_regs;
-    vector<string> ret_regs;
-};
-
 struct ProcDecl : ASTNode {
     string name;
     vector<unique_ptr<FieldDecl>> params;
     vector<unique_ptr<FieldDecl>> rets;
-    string calling_conv;
     vector<unique_ptr<ASTNode>> body;
 };
 
@@ -52,6 +45,17 @@ struct ConstDecl : ASTNode {
 struct SectionDecl : ASTNode {
     string name;
     vector<unique_ptr<ASTNode>> contents;
+};
+
+struct MemRef : ASTNode {
+    string type;
+    string segment;
+    unique_ptr<ASTNode> address;
+    unique_ptr<ASTNode> offset;
+};
+
+struct AddrOf : ASTNode {
+    string name;
 };
 
 struct FrameBlock : ASTNode {
@@ -91,7 +95,16 @@ struct BinaryExpr : ASTNode {
     unique_ptr<ASTNode> right;
 };
 
+struct UnaryExpr : ASTNode {
+    string op;
+    unique_ptr<ASTNode> operand;
+};
+
 struct RegOperand : ASTNode {
+    string name;
+};
+
+struct SegOperand : ASTNode {
     string name;
 };
 
@@ -121,8 +134,42 @@ struct AsmBlock : ASTNode {
     vector<string> lines;
 };
 
-struct ExitStmt : ASTNode {
-    unique_ptr<ASTNode> code;
+struct SyscallStmt : ASTNode {};
+
+struct DerefStmt : ASTNode {
+    string type;
+    unique_ptr<ASTNode> ptr;
+    unique_ptr<ASTNode> offset;
+};
+
+struct InStmt : ASTNode {
+    unique_ptr<ASTNode> port;
+    unique_ptr<ASTNode> dest;
+};
+
+struct OutStmt : ASTNode {
+    unique_ptr<ASTNode> port;
+    unique_ptr<ASTNode> value;
+};
+
+struct CliStmt : ASTNode {};
+
+struct StiStmt : ASTNode {};
+
+struct HltStmt : ASTNode {};
+
+struct BitsStmt : ASTNode {
+    int width;
+};
+
+struct RawData : ASTNode {
+    string directive;
+    vector<unique_ptr<ASTNode>> values;
+};
+
+struct FillStmt : ASTNode {
+    unique_ptr<ASTNode> target;
+    unique_ptr<ASTNode> value;
 };
 
 struct Program : ASTNode {

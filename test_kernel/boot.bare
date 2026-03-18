@@ -1,0 +1,31 @@
+section .text:
+bits 16
+
+proc _start():
+    cli
+
+    reg ax = 0
+    seg ds = reg ax
+    seg es = reg ax
+    seg ss = reg ax
+    reg sp = 0x7C00
+
+    sti
+
+    reg ax = 0xb800
+    seg es = reg ax
+
+    &u16:es:0 = 0x0f00 | 'H'
+    &u16:es:2 = 0x0f00 | 'e'
+    &u16:es:4 = 0x0f00 | 'l'
+    &u16:es:6 = 0x0f00 | 'l'
+    &u16:es:8 = 0x0f00 | 'o'
+
+    loop:
+        hlt
+    end
+
+fill 510, 0
+
+db 0x55
+db 0xAA

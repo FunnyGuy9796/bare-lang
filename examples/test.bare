@@ -11,11 +11,8 @@ var entries: entry[10]
 var count: u32
 
 section .text:
-conv test_call:
-    args: reg ebx
-    ret: reg eax
 
-proc test() -> (result: u1) using test_call:
+proc test():
     when reg ebx > 9:
         reg eax = 1
 
@@ -26,11 +23,7 @@ proc test() -> (result: u1) using test_call:
     
     ret
 
-conv start_call:
-    args: null
-    ret: reg eax
-
-proc _start() -> () using start_call:
+proc _start():
     frame:
         var curr_entry: entry
         curr_entry.base = 0xff000000
@@ -50,16 +43,16 @@ proc _start() -> () using start_call:
             // inline assembly to make a syscall for printing the value of count
             asm:
                 "mov eax, dword [count]"
-                "add eax, 48"              ; convert digit to ASCII (works for 0-9)
-                "mov [esp - 4], eax"       ; store ASCII char on stack
-                "mov eax, 4"               ; sys_write
-                "mov ebx, 1"               ; stdout
-                "lea ecx, [esp - 4]"       ; pointer to char
-                "mov edx, 1"               ; length = 1 byte
+                "add eax, 48              ; convert digit to ASCII (works for 0-9)"
+                "mov [esp - 4], eax       ; store ASCII char on stack"
+                "mov eax, 4               ; sys_write"
+                "mov ebx, 1               ; stdout"
+                "lea ecx, [esp - 4]       ; pointer to char"
+                "mov edx, 1               ; length = 1 byte"
                 "int 0x80"
-                "mov eax, 4"               ; sys_write again for newline
+                "mov eax, 4               ; sys_write again for newline"
                 "mov ebx, 1"
-                "mov dword [esp - 4], 10"  ; newline character
+                "mov dword [esp - 4], 10  ; newline character"
                 "lea ecx, [esp - 4]"
                 "mov edx, 1"
                 "int 0x80"
@@ -68,5 +61,8 @@ proc _start() -> () using start_call:
             count++
         end
     end
+    
+    reg eax = 1
+    reg ebx = 0
 
-    exit 0
+    syscall

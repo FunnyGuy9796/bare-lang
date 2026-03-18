@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <array>
 #include <sstream>
 #include "../parser/ast.h"
 #include "../semantic/semantic.h"
@@ -34,7 +35,6 @@ private:
     string make_label(const string &prefix);
     void gen_program(Program &program);
     void gen_section(SectionDecl &section);
-    void gen_conv(ConvDecl &decl);
     void gen_proc(ProcDecl &decl);
     void gen_var_bss(VarDecl &decl);
     void gen_const(ConstDecl &decl);
@@ -45,12 +45,17 @@ private:
     void gen_assign(AssignStmt &node);
     void gen_incr(IncrStmt &node);
     void gen_call(ProcCall &node);
-    void gen_exit(ExitStmt &node);
     void gen_asm(AsmBlock &node);
+    void gen_out(OutStmt &node);
     string gen_local_ref(const string &name, const string &type);
-    string gen_operand(ASTNode &expr);
+    string gen_operand(ASTNode &expr, const string &size_hint = "u32");
     string gen_lhs(ASTNode &expr);
     string gen_member(const string &object, const string &member);
+    string gen_address(ASTNode &expr);
+    string gen_memref_addr(MemRef &memref);
+    string size_reg(const string &reg, const string &type);
+    void gen_raw_data(RawData &node);
+    void gen_fill(FillStmt &node);
 };
 
 #endif
