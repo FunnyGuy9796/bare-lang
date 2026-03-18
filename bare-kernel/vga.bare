@@ -1,0 +1,18 @@
+section .text:
+
+proc print():
+    loop:
+        reg al = *u8:reg esi
+
+        when reg al == 0:
+            break
+        end
+
+        reg ah = 0x0f
+        *u16:reg edi = reg ax
+
+        reg esi++
+        reg edi = reg edi + 2
+    end
+
+    ret

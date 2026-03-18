@@ -72,6 +72,7 @@ struct LoopBlock : ASTNode {
 struct WhenBlock : ASTNode {
     unique_ptr<ASTNode> condition;
     vector<unique_ptr<ASTNode>> body;
+    vector<unique_ptr<ASTNode>> else_body;
 };
 
 struct RetStmt : ASTNode {};
@@ -85,6 +86,8 @@ struct AssignStmt : ASTNode {
 
 struct IncrStmt : ASTNode {
     string name;
+    string reg_name;
+    bool is_reg = false;
     bool is_dec = false;
 };
 
@@ -101,6 +104,15 @@ struct BinaryExpr : ASTNode {
 struct UnaryExpr : ASTNode {
     string op;
     unique_ptr<ASTNode> operand;
+};
+
+struct CastExpr : ASTNode {
+    string type;
+    unique_ptr<ASTNode> expr;
+};
+
+struct SizeofExpr : ASTNode {
+    string type;
 };
 
 struct RegOperand : ASTNode {

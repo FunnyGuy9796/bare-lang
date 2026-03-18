@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "semantic/semantic.h"
@@ -44,6 +45,49 @@ void print_help() {
 
 void print_version() {
     cout << "bare-compiler 0.1.0\n";
+}
+
+string preprocess(const string &filepath, vector<string> &visited) {
+    for (const auto &v : visited) {
+        if (v == filepath) {
+            cerr << "warning: circular include '" << filepath << "'" << endl;
+
+            return "";
+        }
+    }
+
+    visited.push_back(filepath);
+
+    ifstream file(filepath);
+
+    if (!file.is_open())
+        throw runtime_error("could not open '" + filepath + "'");
+    
+    string result;
+    string line;
+
+    while (getline(file, line)) {
+        size_t first = line.find_first_not_of(" \t");
+
+        if (first != string::npos && line.substr(first, 9) == "#include ") {
+            size_t q1 = line.find('"', first + 9);
+            size_t q2 = line.find('"', q1 + 1);
+
+            if (q1 == string::npos || q2 == string::npos)
+                throw runtime_error("malformed #include in '" + filepath + "'");
+
+            string inc_file = line.substr(q1 + 1, q2 - q1 - 1);
+            filesystem::path base = filesystem::path(filepath).parent_path();
+            string inc_path = (base / inc_file).string();
+
+            result += preprocess(inc_path, visited);
+        } else
+            result += line + "\n";
+    }
+
+    visited.pop_back();
+
+    return result;
 }
 
 int main(int argc, char **argv) {
@@ -112,18 +156,22 @@ int main(int argc, char **argv) {
     vector<token_t> tokens;
 
     for (size_t i = 0; i < input_names.size(); i++) {
-        ifstream input(input_names[i]);
+        string expanded;
+        vector<string> visited;
 
-        if (!input.is_open()) {
-            cerr << "could not open '" << input_names[i] << "'" << endl;
+        try {
+            expanded = preprocess(input_names[i], visited);
+        } catch (const runtime_error &e) {
+            cerr << e.what() << endl;
 
             return 1;
         }
 
+        istringstream stream(expanded);
         string line;
         uint32_t line_num = 1;
 
-        while (getline(input, line)) {
+        while (getline(stream, line)) {
             bool is_blank = line.find_first_not_of(" \t\r\n") == string::npos;
 
             if (line.empty() || is_blank) {

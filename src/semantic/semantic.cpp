@@ -184,7 +184,7 @@ void SemanticAnalyzer::check_statement(ASTNode &node) {
         else if (sym->kind != symbol_t::Kind::PROC)
             report("'" + call->name + "' is not a proc");
     } else if (auto *incr = dynamic_cast<IncrStmt *>(&node)) {
-        if (!locals.lookup(incr->name) && !globals.lookup(incr->name))
+        if (!incr->is_reg && !locals.lookup(incr->name) && !globals.lookup(incr->name))
             report("unknown variable '" + incr->name + "' in increment");
     } else if (auto *when = dynamic_cast<WhenBlock *>(&node))
         check_when(*when);
@@ -393,6 +393,15 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
         return "u32";
     }
 
+    if (auto *cast = dynamic_cast<CastExpr *>(&expr)) {
+        resolve_type(*cast->expr);
+
+        return cast->type;
+    }
+
+    if (auto *sz = dynamic_cast<SizeofExpr *>(&expr))
+        return "u32";
+
     report("unresolved expression type");
 
     return "unknown";
@@ -405,6 +414,9 @@ void SemanticAnalyzer::check_when(WhenBlock &node) {
         report("'when' condition must be a comparison in proc '" + curr_proc + "'");
 
     for (const auto &stmt : node.body)
+        check_statement(*stmt);
+    
+    for (const auto &stmt : node.else_body)
         check_statement(*stmt);
 }
 

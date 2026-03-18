@@ -2,8 +2,9 @@
 
 static const vector<string> KEYWORDS = {
     "data", "end", "section", "const", "var", "proc", "when", "ret", "reg", "seg",
-    "frame", "loop", "break", "args", "null", "asm", "syscall", "addr", "in", "out",
-    "cli", "sti", "hlt", "bits", "db", "dw", "dd", "dq", "fill", "org"
+    "frame", "loop", "break", "args", "null", "asm", "syscall", "in", "out",
+    "cli", "sti", "hlt", "bits", "db", "dw", "dd", "dq", "fill", "org", "else",
+    "cast", "sizeof"
 };
 
 static const vector<string> TYPES = {

@@ -374,8 +374,23 @@ unique_ptr<WhenBlock> Parser::parse_when() {
 
     expect(COLON);
 
-    while (!check_value("end"))
+    while (!check_value("end") && !check_value("else"))
         node->body.push_back(parse_statement());
+    
+    if (check_value("else")) {
+        expect(KEYWORD);
+
+        if (check_value("when")) {
+            node->else_body.push_back(parse_when());
+
+            return node;
+        }
+
+        expect(COLON);
+
+        while (!check_value("end"))
+            node->else_body.push_back(parse_statement());
+    }
     
     expect(KEYWORD);
 
@@ -454,7 +469,24 @@ unique_ptr<ASTNode> Parser::parse_statement() {
     }
 
     if (check_value("reg")) {
-        auto lhs = parse_lhs();
+        expect(KEYWORD);
+
+        string reg_name = expect(REG_NAME).value;
+
+        if (check(OPERATOR) && (peek().value == "++" || peek().value == "--")) {
+            string op = consume().value;
+            auto node = make_unique<IncrStmt>();
+
+            node->reg_name = reg_name;
+            node->is_reg = true;
+            node->is_dec = (op == "--");
+
+            return node;
+        }
+
+        auto lhs = make_unique<RegOperand>();
+
+        lhs->name = reg_name;
 
         expect(ASSIGN);
 
@@ -499,7 +531,7 @@ unique_ptr<ASTNode> Parser::parse_statement() {
         return make_unique<HltStmt>();
     }
 
-    if (check(AMPERSAND)) {
+    if (check(STAR)) {
         auto lhs = parse_lhs();
 
         expect(ASSIGN);
@@ -513,8 +545,8 @@ unique_ptr<ASTNode> Parser::parse_statement() {
         return node;
     }
 
-    if (check(STAR)) {
-        expect(STAR);
+    if (check(AMPERSAND)) {
+        expect(AMPERSAND);
 
         auto lhs = parse_deref();
 
@@ -544,6 +576,120 @@ unique_ptr<ASTNode> Parser::parse_statement() {
     }
 
     throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in statement");
+}
+
+unique_ptr<ASTNode> Parser::parse_primary() {
+    if (check_value("reg")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<RegOperand>();
+
+        node->name = expect(REG_NAME).value;
+
+        return node;
+    } else if (check_value("seg")) {
+        expect(KEYWORD);
+
+        auto node = make_unique<SegOperand>();
+
+        node->name = expect(SEG_NAME).value;
+
+        return node;
+    } else if (check(HEX_LITERAL)) {
+        auto node = make_unique<HexLiteral>();
+
+        node->value = stoull(consume().value, nullptr, 16);
+
+        return node;
+    } else if (check(INT_LITERAL)) {
+        auto node = make_unique<IntLiteral>();
+
+        node->value = stoull(consume().value);
+
+        return node;
+    } else if (check(IDENT) && peek_next().type == DOT) {
+        auto node = make_unique<MemberAccess>();
+
+        node->object = expect(IDENT).value;
+
+        expect(DOT);
+
+        node->member = expect(IDENT).value;
+
+        return node;
+    } else if (check(IDENT) && peek_next().type == LBRACK) {
+        auto node = make_unique<ArrayAccess>();
+
+        node->name = expect(IDENT).value;
+
+        expect(LBRACK);
+
+        node->index = parse_expr();
+
+        expect(RBRACK);
+        return node;
+    } else if (check(IDENT)) {
+        auto node = make_unique<Identifier>();
+
+        node->name = consume().value;
+
+        return node;
+    } else if (check(STAR)) {
+        expect(STAR);
+
+        return parse_memref();
+    } else if (check(AMPERSAND)) {
+        expect(AMPERSAND);
+
+        if (check(IDENT)) {
+            auto node = make_unique<AddrOf>();
+
+            node->name = consume().value;
+
+            return node;
+        } else
+            return parse_deref();
+    } else if (check(LPAREN)) {
+        expect(LPAREN);
+
+        auto inner = parse_expr();
+
+        expect(RPAREN);
+
+        return inner;
+    } else if (check_value("cast")) {
+        expect(KEYWORD);
+        expect(LPAREN);
+
+        string type = expect(TYPE).value;
+
+        expect(COMMA);
+
+        auto node = make_unique<CastExpr>();
+
+        node->type = type;
+        node->expr = parse_expr();
+
+        expect(RPAREN);
+
+        return node;
+    } else if (check_value("sizeof")) {
+        expect(KEYWORD);
+        expect(LPAREN);
+
+        auto node = make_unique<SizeofExpr>();
+
+        if (check(TYPE))
+            node->type = expect(TYPE).value;
+        else
+            node->type = expect(IDENT).value;
+        
+        expect(RPAREN);
+
+        return node;
+    }
+
+    throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in expression");
 }
 
 unique_ptr<ASTNode> Parser::parse_expr() {
@@ -599,14 +745,20 @@ unique_ptr<ASTNode> Parser::parse_expr() {
 
         node->name = consume().value;
         left = move(node);
-    } else if (check(AMPERSAND)) {
-        expect(AMPERSAND);
-
-        left = parse_memref();
     } else if (check(STAR)) {
         expect(STAR);
 
-        left = parse_deref();
+        left = parse_memref();
+    } else if (check(AMPERSAND)) {
+        expect(AMPERSAND);
+
+        if (check(IDENT) && !check_value("reg")) {
+            auto node = make_unique<AddrOf>();
+            node->name = consume().value;
+            left = move(node);
+        } else {
+            left = parse_deref();
+        }
     } else if (check(OPERATOR) && peek().value == "~") {
         consume();
 
@@ -620,19 +772,42 @@ unique_ptr<ASTNode> Parser::parse_expr() {
 
         node->value = consume().value;
         left = move(node);
-    } else if (check_value("addr")) {
-        expect(KEYWORD);
-
-        auto node = make_unique<AddrOf>();
-
-        node->name = expect(IDENT).value;
-        left = move(node);
     } else if (check_value("in")) {
         expect(KEYWORD);
 
         auto node = make_unique<InStmt>();
 
         node->port = parse_expr();
+        left = move(node);
+    } else if (check_value("cast")) {
+        expect(KEYWORD);
+        expect(LPAREN);
+
+        string type = expect(TYPE).value;
+
+        expect(COMMA);
+
+        auto node = make_unique<CastExpr>();
+
+        node->type = type;
+        node->expr = parse_expr();
+
+        expect(RPAREN);
+
+        left = move(node);
+    } else if (check_value("sizeof")) {
+        expect(KEYWORD);
+        expect(LPAREN);
+
+        auto node = make_unique<SizeofExpr>();
+
+        if (check(TYPE))
+            node->type = expect(TYPE).value;
+        else
+            node->type = expect(IDENT).value;
+        
+        expect(RPAREN);
+
         left = move(node);
     } else
         throw runtime_error("error on line " + to_string(peek().line) + ": unexpected token '" + peek().value + "' in expression");
@@ -643,6 +818,19 @@ unique_ptr<ASTNode> Parser::parse_expr() {
         auto node = make_unique<BinaryExpr>();
 
         node->op = "&";
+
+        consume();
+
+        node->left = move(left);
+        node->right = parse_expr();
+
+        return node;
+    }
+
+    if (check(STAR) && peek().line == left_line) {
+        auto node = make_unique<BinaryExpr>();
+
+        node->op = "*";
 
         consume();
 
@@ -720,8 +908,8 @@ unique_ptr<ASTNode> Parser::parse_lhs() {
         return node;
     }
 
-    if (check(AMPERSAND)) {
-        expect(AMPERSAND);
+    if (check(STAR)) {
+        expect(STAR);
 
         return parse_memref();
     }

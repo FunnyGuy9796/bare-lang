@@ -240,30 +240,54 @@ void CodeGen::gen_loop(LoopBlock &node, const string &break_label) {
 
 void CodeGen::gen_when(WhenBlock &node, const string &break_label) {
     string end_label = make_label("when_end");
+    string else_label = make_label("when_else");
 
     if (auto *bin = dynamic_cast<BinaryExpr *>(node.condition.get())) {
-        string left = gen_operand(*bin->left);
+        string left  = gen_operand(*bin->left);
         string right = gen_operand(*bin->right);
 
         out << "    cmp " << left << ", " << right << "\n";
 
-        if (bin->op == "==")
-            out << "    jne " << end_label << "\n";
-        else if (bin->op == "!=")
-            out << "    je "  << end_label << "\n";
-        else if (bin->op == ">=")
-            out << "    jl "  << end_label << "\n";
-        else if (bin->op == "<=")
-            out << "    jg "  << end_label << "\n";
-        else if (bin->op == ">")
-            out << "    jle " << end_label << "\n";
-        else if (bin->op == "<")
-            out << "    jge " << end_label << "\n";
+        if (!node.else_body.empty()) {
+            if (bin->op == "==")
+                out << "    jne " << else_label << "\n";
+            else if (bin->op == "!=")
+                out << "    je "  << else_label << "\n";
+            else if (bin->op == ">=")
+                out << "    jl "  << else_label << "\n";
+            else if (bin->op == "<=")
+                out << "    jg "  << else_label << "\n";
+            else if (bin->op == ">")
+                out << "    jle " << else_label << "\n";
+            else if (bin->op == "<")
+                out << "    jge " << else_label << "\n";
+        } else {
+            if (bin->op == "==")
+                out << "    jne " << end_label << "\n";
+            else if (bin->op == "!=")
+                out << "    je "  << end_label << "\n";
+            else if (bin->op == ">=")
+                out << "    jl "  << end_label << "\n";
+            else if (bin->op == "<=")
+                out << "    jg "  << end_label << "\n";
+            else if (bin->op == ">")
+                out << "    jle " << end_label << "\n";
+            else if (bin->op == "<")
+                out << "    jge " << end_label << "\n";
+        }
     }
 
     for (const auto &stmt : node.body)
         gen_statement(*stmt, break_label);
-    
+
+    if (!node.else_body.empty()) {
+        out << "    jmp " << end_label << "\n";
+        out << else_label << ":\n";
+
+        for (const auto &stmt : node.else_body)
+            gen_statement(*stmt, break_label);
+    }
+
     out << end_label << ":\n";
 }
 
@@ -326,12 +350,19 @@ void CodeGen::gen_assign(AssignStmt &node) {
 }
 
 void CodeGen::gen_incr(IncrStmt &node) {
+    string op = node.is_dec ? "dec" : "inc";
+
+    if (node.is_reg) {
+        out << "    " << op << " " << node.reg_name << "\n";
+
+        return;
+    }
+
     auto *sym = locals.lookup(node.name);
 
     if (!sym)
         sym = globals.lookup(node.name);
 
-    string op = node.is_dec ? "dec" : "inc";
     string sw = sym ? size_word(sym->type) : "dword";
 
     out << "    " << op << " " << sw << " [" << node.name << "]\n";
@@ -463,11 +494,24 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
     }
 
     if (auto *bin = dynamic_cast<BinaryExpr *>(&expr)) {
-        string left  = gen_operand(*bin->left,  size_hint);
+        string left = gen_operand(*bin->left,  size_hint);
         string right = gen_operand(*bin->right, size_hint);
-        string acc   = size_reg("eax", size_hint);
-
-        out << "    mov " << acc << ", " << left << "\n";
+        string acc = size_reg("eax", size_hint);
+        bool needs_movzx = (left.find("byte") != string::npos ||
+                        left.find("word") != string::npos ||
+                        left == "si" || left == "di" ||
+                        left == "ax" || left == "bx" ||
+                        left == "cx" || left == "dx" ||
+                        left == "al" || left == "ah" ||
+                        left == "bl" || left == "bh" ||
+                        left == "cl" || left == "ch" ||
+                        left == "dl" || left == "dh") &&
+                        acc == "eax";
+        
+        if (needs_movzx)
+            out << "    movzx " << acc << ", " << left << "\n";
+        else
+            out << "    mov " << acc << ", " << left << "\n";
 
         if (bin->op == "&")
             out << "    and " << acc << ", " << right << "\n";
@@ -479,9 +523,11 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
             out << "    add " << acc << ", " << right << "\n";
         else if (bin->op == "-")
             out << "    sub " << acc << ", " << right << "\n";
+        else if (bin->op == "*")
+            out << "    imul " << acc << ", " << right << "\n";
         else if (bin->op == "<<" || bin->op == ">>") {
             string instr = (bin->op == "<<") ? "shl" : "shr";
-
+            
             if (dynamic_cast<IntLiteral *>(bin->right.get()))
                 out << "    " << instr << " " << acc << ", " << right << "\n";
             else {
@@ -506,6 +552,47 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
 
         return acc;
     }
+
+    if (auto *cast = dynamic_cast<CastExpr *>(&expr)) {
+        int dst_size = type_size(cast->type);
+        string acc = size_reg("eax", cast->type);
+        int src_size = 4;
+
+        if (auto *ident = dynamic_cast<Identifier *>(cast->expr.get())) {
+            auto *sym = locals.lookup(ident->name);
+
+            if (!sym)
+                sym = globals.lookup(ident->name);
+
+            if (sym)
+                src_size = type_size(sym->type);
+        } else if (auto *reg = dynamic_cast<RegOperand *>(cast->expr.get())) {
+            if (reg->name.back() == 'l' || reg->name.back() == 'h')
+                src_size = 1;
+            else if (reg->name.size() == 2 && reg->name[0] != 'e')
+                src_size = 2;
+        } else if (auto *mem = dynamic_cast<MemRef *>(cast->expr.get()))
+            src_size = type_size(mem->type);
+
+        string src_type = (src_size == 1) ? "u8" : (src_size == 2) ? "u16" : (src_size == 4) ? "u32" : "u64";
+        string inner = gen_operand(*cast->expr, src_type);
+
+        if (dst_size > src_size)
+            out << "    movzx " << acc << ", " << inner << "\n";
+        else if (dst_size < src_size) {
+            string full_acc = size_reg("eax", src_type);
+
+            out << "    mov " << full_acc << ", " << inner << "\n";
+        } else {
+            if (inner != acc)
+                out << "    mov " << acc << ", " << inner << "\n";
+        }
+
+        return acc;
+    }
+
+    if (auto *sz = dynamic_cast<SizeofExpr *>(&expr))
+        return to_string(type_size(sz->type));
 
     return "0";
 }
