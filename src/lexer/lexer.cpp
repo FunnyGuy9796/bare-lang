@@ -322,7 +322,54 @@ vector<token_t> Lexer::lex_file(map<uint32_t, string> &content) {
                 i++;
 
                 while (i < line_content.size() && line_content[i] != '"') {
-                    str_val += line_content[i];
+                    if (line_content[i] == '\\' && i + 1 < line_content.size()) {
+                        i++;
+
+                        switch (line_content[i]) {
+                            case 'n': {
+                                str_val += '\n';
+                                break;
+                            }
+
+                            case 't': {
+                                str_val += '\t';
+                                
+                                break;
+                            }
+
+                            case 'r': {
+                                str_val += '\r';
+                                
+                                break;
+                            }
+
+                            case '0': {
+                                str_val += '\0';
+                                
+                                break;
+                            }
+
+                            case '\\': {
+                                str_val += '\\';
+                                
+                                break;
+                            }
+
+                            case '"': {
+                                str_val += '"';
+                                
+                                break;
+                            }
+
+                            default: {
+                                str_val += line_content[i];
+                                
+                                break;
+                            }
+                        }
+                    } else
+                        str_val += line_content[i];
+
                     i++;
                 }
 

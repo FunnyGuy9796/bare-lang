@@ -24,7 +24,7 @@ run: $(TARGET)
 	cp $(TARGET) iso/boot/
 	cp grub.cfg iso/boot/grub/
 	grub-mkrescue -o $(ISO) iso/
-	qemu-system-i386 -cdrom $(ISO)
+	qemu-system-i386 -cdrom $(ISO) -vga std -display sdl
 
 clean:
 	rm -rf $(OBJS) $(TARGET) $(ISO) iso/

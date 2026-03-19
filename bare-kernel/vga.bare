@@ -2,23 +2,52 @@ proc vga_print():
     loop:
         reg al = *u8:reg esi
 
-        when reg al == 0:
+        when reg al == '\0':
             break
         end
 
-        reg bl = fg_color
-        reg bh = bg_color
-        reg bh = reg bh << 4
-        reg ah = reg bl | reg bh
-        *u16:reg edi = reg ax
+        when reg al == '\n':
+            curr_col = 0
+            curr_row++
 
-        reg esi++
-        reg edi = reg edi + 2
+            reg esi++
+        else:
+            reg bl = fg_color
+            reg bh = bg_color
+            reg bh = reg bh << 4
+            reg bl = reg bl | reg bh
+            reg ah = reg bl
+
+            reg ebx = cast(u32, reg ax)
+            
+            vga_move_cursor()
+            
+            reg ax = cast(u16, reg ebx)
+            
+            *u16:reg edi = reg ax
+
+            reg esi++
+            curr_col++
+
+            reg ecx = cast(u32, curr_col)
+            reg edx = cast(u32, vga_cols)
+
+            when reg ecx >= reg edx:
+                curr_col = 0
+                curr_row++
+            end
+        end
     end
-
+    
     ret
 
 proc vga_move_cursor():
-    reg edi = vga + cast(u32, curr_row * cast(u8, vga_cols * 2) + curr_col * 2)
+    reg eax = cast(u32, curr_row)
+    reg eax = reg eax * 160
+    reg ecx = cast(u32, curr_col)
+    reg ecx = reg ecx * 2
+    reg eax = reg eax + reg ecx
+    reg edi = vga
+    reg edi = reg edi + reg eax
 
     ret

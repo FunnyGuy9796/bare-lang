@@ -4,8 +4,7 @@ dd 0x00
 dd 0xe4524ffe
 
 section(.rodata):
-const msg: u8 = "Hello from bare lang"
-const msg2: u8 = "This is a basic program running on i686 bare metal"
+const msg: u8 = "Hello from the bare kernel\nThis is a basic program running on i686 bare metal written using bare-lang"
 const vga: u32 = 0xb8000
 const vga_rows: u8 = 25
 const vga_cols: u8 = 80
@@ -27,14 +26,6 @@ proc _start():
     reg esp = 0x9000
     reg esi = &msg
     
-    vga_move_cursor()
-    vga_print()
-
-    reg esi = &msg2
-    
-    curr_row = 1
-    curr_col = 0
-
     vga_move_cursor()
     vga_print()
 
