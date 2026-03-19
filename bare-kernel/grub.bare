@@ -7,12 +7,16 @@ section(.rodata):
 const msg: u8 = "Hello from bare lang"
 const msg2: u8 = "This is a basic program running on i686 bare metal"
 const vga: u32 = 0xb8000
-const rows: u8 = 25
-const cols: u8 = 80
+const vga_rows: u8 = 25
+const vga_cols: u8 = 80
 
 section(.bss):
 var curr_row: u8
 var curr_col: u8
+
+section(.data):
+var fg_color: u8 = 0x0f
+var bg_color: u8 = 0x00
 
 section(.text):
 bits(32)
@@ -23,16 +27,16 @@ proc _start():
     reg esp = 0x9000
     reg esi = &msg
     
-    move_cursor()
-    print()
+    vga_move_cursor()
+    vga_print()
 
     reg esi = &msg2
     
     curr_row = 1
     curr_col = 0
 
-    move_cursor()
-    print()
+    vga_move_cursor()
+    vga_print()
 
     loop:
         hlt

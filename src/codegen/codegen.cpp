@@ -584,6 +584,17 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
                 out << "    xor " << left << ", " << right << "\n";
 
                 return left;
+            } else if (bin->op == "<<" || bin->op == ">>") {
+                string instr = (bin->op == "<<") ? "shl" : "shr";
+
+                if (dynamic_cast<IntLiteral *>(bin->right.get()))
+                    out << "    " << instr << " " << left << ", " << right << "\n";
+                else {
+                    out << "    mov cl, " << right << "\n";
+                    out << "    " << instr << " " << left << ", cl\n";
+                }
+                
+                return left;
             }
         }
 

@@ -1,4 +1,4 @@
-proc print():
+proc vga_print():
     loop:
         reg al = *u8:reg esi
 
@@ -6,7 +6,10 @@ proc print():
             break
         end
 
-        reg ah = 0x0f
+        reg bl = fg_color
+        reg bh = bg_color
+        reg bh = reg bh << 4
+        reg ah = reg bl | reg bh
         *u16:reg edi = reg ax
 
         reg esi++
@@ -15,7 +18,7 @@ proc print():
 
     ret
 
-proc move_cursor():
-    reg edi = vga + cast(u32, curr_row * cast(u8, cols * 2) + curr_col * 2)
+proc vga_move_cursor():
+    reg edi = vga + cast(u32, curr_row * cast(u8, vga_cols * 2) + curr_col * 2)
 
     ret
