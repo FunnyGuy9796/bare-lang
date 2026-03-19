@@ -1,5 +1,3 @@
-section .text:
-
 proc print():
     loop:
         reg al = *u8:reg esi
@@ -14,5 +12,10 @@ proc print():
         reg esi++
         reg edi = reg edi + 2
     end
+
+    ret
+
+proc move_cursor():
+    reg edi = vga + cast(u32, curr_row * cast(u8, cols * 2) + curr_col * 2)
 
     ret

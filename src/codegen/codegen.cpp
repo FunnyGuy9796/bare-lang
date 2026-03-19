@@ -86,9 +86,12 @@ void CodeGen::gen_section(SectionDecl &section) {
             continue;
         else if (auto *bits = dynamic_cast<BitsStmt *>(node.get()))
             out << "bits " << bits->width << "\n";
-        else if (auto *var = dynamic_cast<VarDecl *>(node.get()))
-            gen_var_bss(*var);
-        else if (auto *cn = dynamic_cast<ConstDecl *>(node.get()))
+        else if (auto *var = dynamic_cast<VarDecl *>(node.get())) {
+            if (var->initializer)
+                gen_var_data(*var);
+            else
+                gen_var_bss(*var);
+        } else if (auto *cn = dynamic_cast<ConstDecl *>(node.get()))
             gen_const(*cn);
         else if (auto *proc = dynamic_cast<ProcDecl *>(node.get()))
             gen_proc(*proc);
@@ -99,6 +102,29 @@ void CodeGen::gen_section(SectionDecl &section) {
         else if (auto *fill = dynamic_cast<FillStmt *>(node.get()))
             gen_fill(*fill);
     }
+}
+
+void CodeGen::gen_var_data(VarDecl &decl) {
+    string dbX;
+    int size = type_size(decl.type);
+
+    if (size == 1)
+        dbX = "db";
+    else if (size == 2)
+        dbX = "dw";
+    else if (size == 4)
+        dbX = "dd";
+    else if (size == 8)
+        dbX = "dq";
+    else
+        dbX = "dd";
+
+    string val = gen_operand(*decl.initializer);
+
+    if (decl.is_array)
+        out << "    " << decl.name << ": times " << decl.array_size << " " << dbX << " " << val << "\n";
+    else
+        out << "    " << decl.name << ": " << dbX << " " << val << "\n";
 }
 
 void CodeGen::gen_var_bss(VarDecl &decl) {
@@ -346,7 +372,19 @@ void CodeGen::gen_assign(AssignStmt &node) {
 
     string rhs = gen_operand(*node.rhs, lhs_type);
 
-    out << "    mov " << lhs << ", " << rhs << "\n";
+    if (lhs == rhs)
+        return;
+
+    bool src_is_byte = rhs.size() >= 4 && rhs.substr(0, 4) == "byte";
+    bool src_is_word = rhs.size() >= 4 && rhs.substr(0, 4) == "word";
+    bool dest_is_32bit_reg = (lhs == "eax" || lhs == "ebx" || lhs == "ecx" ||
+                            lhs == "edx" || lhs == "esi" || lhs == "edi" ||
+                            lhs == "esp" || lhs == "ebp");
+
+    if (dest_is_32bit_reg && (src_is_byte || src_is_word))
+        out << "    movzx " << lhs << ", " << rhs << "\n";
+    else
+        out << "    mov " << lhs << ", " << rhs << "\n";
 }
 
 void CodeGen::gen_incr(IncrStmt &node) {
@@ -400,6 +438,9 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
 
         return ss.str();
     }
+
+    if (dynamic_cast<NullLiteral *>(&expr))
+        return "0";
 
     if (auto *reg = dynamic_cast<RegOperand *>(&expr))
         return reg->name;
@@ -494,20 +535,69 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
     }
 
     if (auto *bin = dynamic_cast<BinaryExpr *>(&expr)) {
-        string left = gen_operand(*bin->left,  size_hint);
-        string right = gen_operand(*bin->right, size_hint);
         string acc = size_reg("eax", size_hint);
+        bool right_is_complex = !dynamic_cast<IntLiteral *>(bin->right.get()) &&
+                                !dynamic_cast<HexLiteral *>(bin->right.get()) &&
+                                !dynamic_cast<RegOperand *>(bin->right.get());
+        string right;
+
+        if (right_is_complex) {
+            right = gen_operand(*bin->right, size_hint);
+
+            bool right_is_byte = right.size() >= 4 && right.substr(0, 4) == "byte";
+            bool right_is_word = right.size() >= 4 && right.substr(0, 4) == "word";
+
+            if (right_is_byte || right_is_word)
+                out << "    movzx ecx, " << right << "\n";
+            else
+                out << "    mov ecx, " << right << "\n";
+
+            right = size_reg("ecx", size_hint);
+        }
+
+        string left = gen_operand(*bin->left, size_hint);
+
+        if (!right_is_complex)
+            right = gen_operand(*bin->right, size_hint);
+
+        bool left_is_pure_reg = dynamic_cast<RegOperand *>(bin->left.get()) != nullptr;
+        bool left_is_eax_family = (left == "eax" || left == "ax" || left == "al" || left == "ah");
+
+        if (left_is_pure_reg && !left_is_eax_family) {
+            if (bin->op == "+") {
+                out << "    add " << left << ", " << right << "\n";
+
+                return left;
+            } else if (bin->op == "-") {
+                out << "    sub " << left << ", " << right << "\n";
+
+                return left;
+            } else if (bin->op == "&") {
+                out << "    and " << left << ", " << right << "\n";
+
+                return left;
+            } else if (bin->op == "|") {
+                out << "    or "  << left << ", " << right << "\n";
+
+                return left;
+            } else if (bin->op == "^") {
+                out << "    xor " << left << ", " << right << "\n";
+
+                return left;
+            }
+        }
+
         bool needs_movzx = (left.find("byte") != string::npos ||
-                        left.find("word") != string::npos ||
-                        left == "si" || left == "di" ||
-                        left == "ax" || left == "bx" ||
-                        left == "cx" || left == "dx" ||
-                        left == "al" || left == "ah" ||
-                        left == "bl" || left == "bh" ||
-                        left == "cl" || left == "ch" ||
-                        left == "dl" || left == "dh") &&
-                        acc == "eax";
-        
+                            (left.find("word") != string::npos && left.find("dword") == string::npos) ||
+                            left == "si" || left == "di" ||
+                            left == "ax" || left == "bx" ||
+                            left == "cx" || left == "dx" ||
+                            left == "al" || left == "ah" ||
+                            left == "bl" || left == "bh" ||
+                            left == "cl" || left == "ch" ||
+                            left == "dl" || left == "dh") &&
+                            acc == "eax";
+
         if (needs_movzx)
             out << "    movzx " << acc << ", " << left << "\n";
         else
@@ -527,7 +617,7 @@ string CodeGen::gen_operand(ASTNode &expr, const string &size_hint) {
             out << "    imul " << acc << ", " << right << "\n";
         else if (bin->op == "<<" || bin->op == ">>") {
             string instr = (bin->op == "<<") ? "shl" : "shr";
-            
+
             if (dynamic_cast<IntLiteral *>(bin->right.get()))
                 out << "    " << instr << " " << acc << ", " << right << "\n";
             else {

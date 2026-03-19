@@ -145,6 +145,8 @@ struct HexLiteral : ASTNode {
     uint64_t value;
 };
 
+struct NullLiteral : ASTNode {};
+
 struct AsmBlock : ASTNode {
     vector<string> lines;
 };

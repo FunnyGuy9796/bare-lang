@@ -2,8 +2,8 @@ BCC := ./../bare-compiler
 LD := ld
 LDFLAGS := -m elf_i386 -T linker.ld
 
-SRCS := $(shell find -name "*.bare")
-OBJS := $(patsubst %.bare, %.o, $(SRCS))
+SRCS := grub.bare
+OBJS := grub.o
 
 TARGET := kernel.elf
 ISO := bare.iso

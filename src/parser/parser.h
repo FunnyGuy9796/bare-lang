@@ -33,7 +33,6 @@ private:
     unique_ptr<LoopBlock> parse_loop();
     unique_ptr<WhenBlock> parse_when();
     unique_ptr<ASTNode> parse_statement();
-    unique_ptr<ASTNode> parse_primary();
     unique_ptr<ASTNode> parse_expr();
     unique_ptr<ASTNode> parse_lhs();
     unique_ptr<ASTNode> parse_asm();

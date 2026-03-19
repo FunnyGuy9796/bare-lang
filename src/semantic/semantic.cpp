@@ -285,6 +285,9 @@ string SemanticAnalyzer::resolve_type(ASTNode &expr) {
     if (dynamic_cast<SegOperand *>(&expr))
         return "u16";
     
+    if (dynamic_cast<NullLiteral *>(&expr))
+        return "u32";
+    
     if (auto *memref = dynamic_cast<MemRef *>(&expr)) {
         if (memref->address)
             resolve_type(*memref->address);

@@ -36,6 +36,7 @@ private:
     void gen_program(Program &program);
     void gen_section(SectionDecl &section);
     void gen_proc(ProcDecl &decl);
+    void gen_var_data(VarDecl &decl);
     void gen_var_bss(VarDecl &decl);
     void gen_const(ConstDecl &decl);
     void gen_statement(ASTNode &node, const string &break_label = "");
